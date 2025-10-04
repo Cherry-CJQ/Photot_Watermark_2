@@ -67,28 +67,28 @@ class ImageProcessor:
                 - font_size: 字体大小
                 - color: 文本颜色 (R, G, B, A)
                 - opacity: 透明度 (0-100)
+                - rotation: 旋转角度
         
         Returns:
             添加水印后的图像
         """
         try:
-            # 创建水印图层
-            watermark_layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
-            draw = ImageDraw.Draw(watermark_layer)
-            
             # 获取参数
             font_path = kwargs.get('font_path', None)
             font_size = kwargs.get('font_size', 24)
             color = kwargs.get('color', (255, 255, 255, 128))  # 默认白色半透明
             opacity = kwargs.get('opacity', 100)
+            rotation = kwargs.get('rotation', 0)
             
             # 处理透明度
             if len(color) == 3:
                 r, g, b = color
                 a = int(255 * opacity / 100)
+                color = (r, g, b, a)
             elif len(color) == 4:
                 r, g, b, a = color
                 a = int(a * opacity / 100)
+                color = (r, g, b, a)
             
             # 加载字体
             try:
@@ -100,24 +100,40 @@ class ImageProcessor:
             except:
                 font = ImageFont.load_default()
             
+            # 创建一个足够大的图像来容纳文本
+            # 先创建一个临时图像来计算文本大小
+            temp_image = Image.new("RGBA", (500, 100), (0, 0, 0, 0))
+            temp_draw = ImageDraw.Draw(temp_image)
+            
             # 计算文本大小
             try:
                 # 新版本PIL
-                left, top, right, bottom = draw.textbbox((0, 0), text, font=font)
+                left, top, right, bottom = temp_draw.textbbox((0, 0), text, font=font)
                 text_width = right - left
                 text_height = bottom - top
             except:
                 # 兼容旧版本PIL
-                text_width, text_height = draw.textsize(text, font=font)
+                text_width, text_height = temp_draw.textsize(text, font=font)
+            
+            # 创建合适大小的水印图像
+            watermark_image = Image.new("RGBA", (text_width + 20, text_height + 20), (0, 0, 0, 0))
+            draw = ImageDraw.Draw(watermark_image)
+            
+            # 在水印图像中心绘制文本
+            draw.text((10, 10), text, font=font, fill=color)
+            
+            # 旋转水印
+            if rotation != 0:
+                watermark_image = watermark_image.rotate(rotation, expand=1)
             
             # 解析位置
-            x, y = self._parse_position(position, image.size, (text_width, text_height))
+            x, y = self._parse_position(position, image.size, watermark_image.size)
             
-            # 绘制文本水印
-            draw.text((x, y), text, font=font, fill=(r, g, b, a))
+            # 创建结果图像
+            result = image.copy()
             
-            # 将水印图层与原图合并
-            result = Image.alpha_composite(image, watermark_layer)
+            # 粘贴水印
+            result.paste(watermark_image, (x, y), watermark_image)
             return result
         except Exception as e:
             raise Exception(f"添加文本水印失败: {str(e)}")
@@ -133,6 +149,7 @@ class ImageProcessor:
             kwargs: 其他参数
                 - scale: 缩放比例
                 - opacity: 透明度 (0-100)
+                - rotation: 旋转角度
         
         Returns:
             添加水印后的图像
@@ -141,6 +158,7 @@ class ImageProcessor:
             # 获取参数
             scale = kwargs.get('scale', 1.0)
             opacity = kwargs.get('opacity', 100)
+            rotation = kwargs.get('rotation', 0)
             
             # 调整水印图片大小
             if scale != 1.0:
@@ -165,6 +183,10 @@ class ImageProcessor:
             # 确保水印图片是RGBA模式
             if watermark_image.mode != "RGBA":
                 watermark_image = watermark_image.convert("RGBA")
+            
+            # 旋转水印
+            if rotation != 0:
+                watermark_image = watermark_image.rotate(rotation, expand=1)
             
             # 解析位置
             x, y = self._parse_position(position, image.size, watermark_image.size)
