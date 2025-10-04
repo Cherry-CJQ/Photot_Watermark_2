@@ -37,6 +37,7 @@ class MainWindow(QMainWindow):
         self.image_processor = ImageProcessor()  # 图像处理器
         self.current_watermark_image = None  # 当前水印图片
         self.watermark_color = QColor(255, 255, 255, 128)  # 默认水印颜色
+        self.processed_image = None  # 处理后的图像
         self.init_ui()
         
     def init_ui(self):
@@ -343,6 +344,8 @@ class MainWindow(QMainWindow):
             try:
                 # 使用PIL打开图片
                 image = Image.open(self.image_files[index])
+                # 重置处理后的图像
+                self.processed_image = None
                 # 调整图片大小以适应预览区域
                 image = image.copy()  # 创建副本避免影响原图
                 max_width, max_height = 600, 500
@@ -410,6 +413,9 @@ class MainWindow(QMainWindow):
             self.image_path_label.setText(file_path)
             try:
                 self.current_watermark_image = Image.open(file_path)
+                # 确保图片是RGBA模式
+                if self.current_watermark_image.mode != "RGBA":
+                    self.current_watermark_image = self.current_watermark_image.convert("RGBA")
                 self.status_bar.showMessage(f'已选择水印图片: {os.path.basename(file_path)}')
             except Exception as e:
                 QMessageBox.warning(self, "错误", f"无法加载水印图片: {str(e)}")
@@ -467,6 +473,9 @@ class MainWindow(QMainWindow):
                     opacity=opacity
                 )
                 
+            # 保存处理后的图像
+            self.processed_image = image
+            
             # 显示添加水印后的图片
             self.display_processed_image(image)
             self.status_bar.showMessage('水印已应用')

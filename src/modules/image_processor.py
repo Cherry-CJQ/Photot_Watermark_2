@@ -50,7 +50,7 @@ class ImageProcessor:
                 rgb_image.paste(image, mask=image.split()[-1] if image.mode == 'RGBA' else None)
                 rgb_image.save(file_path, format=file_format, quality=quality)
             else:
-                image.save(file_path, format=file_format, quality=quality if file_format == 'JPEG' else None)
+                image.save(file_path, format=file_format)
         except Exception as e:
             raise Exception(f"无法保存图片 {file_path}: {str(e)}")
     
@@ -95,14 +95,20 @@ class ImageProcessor:
                 if font_path and os.path.exists(font_path):
                     font = ImageFont.truetype(font_path, font_size)
                 else:
+                    # 使用默认字体
                     font = ImageFont.load_default()
             except:
                 font = ImageFont.load_default()
             
             # 计算文本大小
-            bbox = draw.textbbox((0, 0), text, font=font)
-            text_width = bbox[2] - bbox[0]
-            text_height = bbox[3] - bbox[1]
+            try:
+                # 新版本PIL
+                left, top, right, bottom = draw.textbbox((0, 0), text, font=font)
+                text_width = right - left
+                text_height = bottom - top
+            except:
+                # 兼容旧版本PIL
+                text_width, text_height = draw.textsize(text, font=font)
             
             # 解析位置
             x, y = self._parse_position(position, image.size, (text_width, text_height))
@@ -143,11 +149,18 @@ class ImageProcessor:
                 watermark_image = watermark_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
             
             # 处理透明度
-            if opacity < 100 and watermark_image.mode == "RGBA":
-                # 分离alpha通道并调整透明度
-                r, g, b, alpha = watermark_image.split()
-                alpha = alpha.point(lambda x: int(x * opacity / 100))
-                watermark_image = Image.merge('RGBA', (r, g, b, alpha))
+            if opacity < 100:
+                if watermark_image.mode == "RGBA":
+                    # 分离alpha通道并调整透明度
+                    r, g, b, alpha = watermark_image.split()
+                    alpha = alpha.point(lambda x: int(x * opacity / 100))
+                    watermark_image = Image.merge('RGBA', (r, g, b, alpha))
+                else:
+                    # 对于非RGBA图像，先转换为RGBA
+                    watermark_image = watermark_image.convert("RGBA")
+                    r, g, b, alpha = watermark_image.split()
+                    alpha = alpha.point(lambda x: int(x * opacity / 100))
+                    watermark_image = Image.merge('RGBA', (r, g, b, alpha))
             
             # 确保水印图片是RGBA模式
             if watermark_image.mode != "RGBA":
