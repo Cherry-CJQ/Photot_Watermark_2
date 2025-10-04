@@ -1,0 +1,5 @@
+# 项目依赖文件
+
+Pillow>=8.0.0
+PyQt5>=5.15.0
+PyInstaller>=4.0
