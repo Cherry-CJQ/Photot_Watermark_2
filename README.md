@@ -17,7 +17,7 @@
 ## 技术栈
 
 - Python 3.8+
-- PyQt5/PyQt6 或 Tkinter（GUI框架）
+- PyQt5（GUI框架）
 - Pillow（图像处理库）
 - PyInstaller（打包工具）
 
@@ -29,6 +29,13 @@
 ### 安装依赖
 ```bash
 pip install -r requirements.txt
+```
+
+如果直接安装出现问题，可以分别安装依赖：
+```bash
+pip install PyQt5
+pip install Pillow
+pip install PyInstaller
 ```
 
 ## 项目结构
@@ -57,7 +64,7 @@ python src/main.py
 
 使用PyInstaller打包为Windows可执行文件：
 ```bash
-pyinstaller --onefile src/main.py
+pyinstaller --onefile --windowed src/main.py
 ```
 
 ## 使用说明

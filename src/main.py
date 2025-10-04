@@ -9,11 +9,18 @@ import sys
 import os
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QPushButton, QLabel, QListWidget,
-                             QFileDialog, QToolBar, QAction, QStatusBar, QListWidgetItem)
+                             QFileDialog, QToolBar, QAction, QStatusBar, QListWidgetItem,
+                             QGroupBox, QFormLayout, QLineEdit, QSpinBox, QDoubleSpinBox,
+                             QComboBox, QColorDialog, QMessageBox)
 from PyQt5.QtCore import Qt, QSize
-from PyQt5.QtGui import QIcon, QPixmap, QImage
+from PyQt5.QtGui import QIcon, QPixmap, QImage, QColor
 from PIL import Image
 import numpy as np
+
+# 添加项目模块路径
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+from modules.image_processor import ImageProcessor
 
 class MainWindow(QMainWindow):
     """
@@ -27,6 +34,9 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.image_files = []  # 存储导入的图片文件路径
         self.current_image_index = -1  # 当前选中的图片索引
+        self.image_processor = ImageProcessor()  # 图像处理器
+        self.current_watermark_image = None  # 当前水印图片
+        self.watermark_color = QColor(255, 255, 255, 128)  # 默认水印颜色
         self.init_ui()
         
     def init_ui(self):
@@ -35,7 +45,7 @@ class MainWindow(QMainWindow):
         """
         # 设置窗口属性
         self.setWindowTitle('Photot 水印工具')
-        self.setGeometry(100, 100, 1000, 700)
+        self.setGeometry(100, 100, 1200, 700)
         
         # 创建中央部件
         self.central_widget = QWidget()
@@ -127,12 +137,8 @@ class MainWindow(QMainWindow):
         control_label.setAlignment(Qt.AlignCenter)
         self.control_layout.addWidget(control_label)
         
-        # 添加控制组件（暂时留空，后续添加）
-        control_placeholder = QLabel('水印控制面板')
-        control_placeholder.setAlignment(Qt.AlignCenter)
-        control_placeholder.setMinimumHeight(400)
-        control_placeholder.setStyleSheet("border: 1px solid gray;")
-        self.control_layout.addWidget(control_placeholder)
+        # 创建水印控制面板
+        self.create_watermark_controls()
         
         # 添加导出按钮
         self.export_button = QPushButton('导出图片')
@@ -141,6 +147,93 @@ class MainWindow(QMainWindow):
         
         # 将控制区域添加到主布局
         self.main_layout.addWidget(self.control_widget, 1)
+        
+    def create_watermark_controls(self):
+        """
+        创建水印控制组件
+        """
+        # 文本水印组
+        text_group = QGroupBox("文本水印")
+        text_layout = QFormLayout()
+        
+        self.text_input = QLineEdit("水印文本")
+        text_layout.addRow("文本:", self.text_input)
+        
+        self.font_size_spinbox = QSpinBox()
+        self.font_size_spinbox.setRange(8, 100)
+        self.font_size_spinbox.setValue(24)
+        text_layout.addRow("字体大小:", self.font_size_spinbox)
+        
+        color_layout = QHBoxLayout()
+        self.color_button = QPushButton("选择颜色")
+        self.color_button.clicked.connect(self.select_color)
+        self.color_preview = QLabel()
+        self.color_preview.setFixedSize(30, 30)
+        self.color_preview.setStyleSheet("background-color: rgba(255, 255, 255, 128); border: 1px solid black;")
+        color_layout.addWidget(self.color_button)
+        color_layout.addWidget(self.color_preview)
+        color_layout.addStretch()
+        text_layout.addRow("颜色:", color_layout)
+        
+        self.text_opacity_spinbox = QSpinBox()
+        self.text_opacity_spinbox.setRange(0, 100)
+        self.text_opacity_spinbox.setValue(50)
+        self.text_opacity_spinbox.setSuffix(" %")
+        text_layout.addRow("透明度:", self.text_opacity_spinbox)
+        
+        text_group.setLayout(text_layout)
+        self.control_layout.addWidget(text_group)
+        
+        # 图片水印组
+        image_group = QGroupBox("图片水印")
+        image_layout = QFormLayout()
+        
+        image_select_layout = QHBoxLayout()
+        self.image_path_label = QLabel("未选择图片")
+        self.select_image_button = QPushButton("选择图片")
+        self.select_image_button.clicked.connect(self.select_watermark_image)
+        image_select_layout.addWidget(self.image_path_label)
+        image_select_layout.addWidget(self.select_image_button)
+        image_layout.addRow("水印图片:", image_select_layout)
+        
+        self.scale_spinbox = QDoubleSpinBox()
+        self.scale_spinbox.setRange(0.1, 5.0)
+        self.scale_spinbox.setSingleStep(0.1)
+        self.scale_spinbox.setValue(1.0)
+        self.scale_spinbox.setSuffix(" x")
+        image_layout.addRow("缩放比例:", self.scale_spinbox)
+        
+        self.image_opacity_spinbox = QSpinBox()
+        self.image_opacity_spinbox.setRange(0, 100)
+        self.image_opacity_spinbox.setValue(50)
+        self.image_opacity_spinbox.setSuffix(" %")
+        image_layout.addRow("透明度:", self.image_opacity_spinbox)
+        
+        image_group.setLayout(image_layout)
+        self.control_layout.addWidget(image_group)
+        
+        # 位置控制组
+        position_group = QGroupBox("位置控制")
+        position_layout = QVBoxLayout()
+        
+        position_select_layout = QHBoxLayout()
+        self.position_combo = QComboBox()
+        self.position_combo.addItems([
+            "top-left", "top-center", "top-right",
+            "middle-left", "center", "middle-right",
+            "bottom-left", "bottom-center", "bottom-right"
+        ])
+        position_select_layout.addWidget(QLabel("预设位置:"))
+        position_select_layout.addWidget(self.position_combo)
+        position_select_layout.addStretch()
+        position_layout.addLayout(position_select_layout)
+        
+        self.apply_button = QPushButton("应用水印")
+        self.apply_button.clicked.connect(self.apply_watermark)
+        position_layout.addWidget(self.apply_button)
+        
+        position_group.setLayout(position_layout)
+        self.control_layout.addWidget(position_group)
         
     def create_menus_and_toolbar(self):
         """
@@ -290,6 +383,126 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage(f'导出功能待实现，目录: {export_dir}')
         else:
             self.status_bar.showMessage('导出已取消')
+            
+    def select_color(self):
+        """
+        选择水印颜色
+        """
+        color = QColorDialog.getColor(self.watermark_color)
+        if color.isValid():
+            self.watermark_color = color
+            self.color_preview.setStyleSheet(
+                f"background-color: {color.name()}; border: 1px solid black;"
+            )
+            
+    def select_watermark_image(self):
+        """
+        选择水印图片
+        """
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, 
+            '选择水印图片', 
+            '', 
+            '图片文件 (*.png *.jpg *.jpeg *.bmp *.tiff)'
+        )
+        
+        if file_path:
+            self.image_path_label.setText(file_path)
+            try:
+                self.current_watermark_image = Image.open(file_path)
+                self.status_bar.showMessage(f'已选择水印图片: {os.path.basename(file_path)}')
+            except Exception as e:
+                QMessageBox.warning(self, "错误", f"无法加载水印图片: {str(e)}")
+                self.current_watermark_image = None
+                
+    def apply_watermark(self):
+        """
+        应用水印
+        """
+        if self.current_image_index < 0 or self.current_image_index >= len(self.image_files):
+            self.status_bar.showMessage('请先选择一张图片')
+            return
+            
+        try:
+            # 加载当前图片
+            image_path = self.image_files[self.current_image_index]
+            image = self.image_processor.load_image(image_path)
+            
+            # 检查是否同时使用文本和图片水印
+            use_text = bool(self.text_input.text().strip())
+            use_image = self.current_watermark_image is not None
+            
+            if not use_text and not use_image:
+                self.status_bar.showMessage('请输入水印文本或选择水印图片')
+                return
+                
+            # 获取位置
+            position = self.position_combo.currentText()
+            
+            # 应用文本水印
+            if use_text:
+                text = self.text_input.text()
+                font_size = self.font_size_spinbox.value()
+                opacity = self.text_opacity_spinbox.value()
+                color = (self.watermark_color.red(), 
+                        self.watermark_color.green(), 
+                        self.watermark_color.blue(), 
+                        self.watermark_color.alpha())
+                
+                image = self.image_processor.add_text_watermark(
+                    image, text, position,
+                    font_size=font_size,
+                    color=color,
+                    opacity=opacity
+                )
+                
+            # 应用图片水印
+            if use_image:
+                scale = self.scale_spinbox.value()
+                opacity = self.image_opacity_spinbox.value()
+                
+                image = self.image_processor.add_image_watermark(
+                    image, self.current_watermark_image, position,
+                    scale=scale,
+                    opacity=opacity
+                )
+                
+            # 显示添加水印后的图片
+            self.display_processed_image(image)
+            self.status_bar.showMessage('水印已应用')
+            
+        except Exception as e:
+            QMessageBox.warning(self, "错误", f"应用水印失败: {str(e)}")
+            
+    def display_processed_image(self, image):
+        """
+        显示处理后的图片
+        """
+        try:
+            # 调整图片大小以适应预览区域
+            image = image.copy()  # 创建副本避免影响原图
+            max_width, max_height = 600, 500
+            image.thumbnail((max_width, max_height), Image.Resampling.LANCZOS)
+            
+            # 转换为numpy数组
+            if image.mode == "RGB":
+                r, g, b = image.split()
+                image = Image.merge("RGB", (b, g, r))
+            elif image.mode == "RGBA":
+                r, g, b, a = image.split()
+                image = Image.merge("RGBA", (b, g, r, a))
+            elif image.mode == "L":
+                image = image.convert("RGB")
+            
+            # 转换为QImage并显示
+            image_data = image.tobytes("raw", "RGB")
+            qimage = QImage(image_data, image.size[0], image.size[1], QImage.Format_RGB888)
+            qpixmap = QPixmap.fromImage(qimage)
+            self.preview_label.setPixmap(qpixmap)
+            self.preview_label.setAlignment(Qt.AlignCenter)
+        except Exception as e:
+            self.preview_label.setText(f'无法显示处理后的图片: {str(e)}')
+            print(f"显示处理后的图片失败: {e}")
 
 def main():
     """
