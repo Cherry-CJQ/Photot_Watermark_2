@@ -11,7 +11,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QPushButton, QLabel, QListWidget,
                              QFileDialog, QToolBar, QAction, QStatusBar, QListWidgetItem,
                              QGroupBox, QFormLayout, QLineEdit, QSpinBox, QDoubleSpinBox,
-                             QComboBox, QColorDialog, QMessageBox)
+                             QComboBox, QColorDialog, QMessageBox, QSlider)
 from PyQt5.QtCore import Qt, QSize
 from PyQt5.QtGui import QIcon, QPixmap, QImage, QColor
 from PIL import Image
@@ -182,6 +182,18 @@ class MainWindow(QMainWindow):
         self.text_opacity_spinbox.setSuffix(" %")
         text_layout.addRow("透明度:", self.text_opacity_spinbox)
         
+        # 文本水印旋转
+        text_rotation_layout = QHBoxLayout()
+        self.text_rotation_slider = QSlider(Qt.Horizontal)
+        self.text_rotation_slider.setRange(0, 360)
+        self.text_rotation_slider.setValue(0)
+        self.text_rotation_label = QLabel("0°")
+        self.text_rotation_slider.valueChanged.connect(
+            lambda v: self.text_rotation_label.setText(f"{v}°"))
+        text_rotation_layout.addWidget(self.text_rotation_slider)
+        text_rotation_layout.addWidget(self.text_rotation_label)
+        text_layout.addRow("旋转:", text_rotation_layout)
+        
         text_group.setLayout(text_layout)
         self.control_layout.addWidget(text_group)
         
@@ -209,6 +221,18 @@ class MainWindow(QMainWindow):
         self.image_opacity_spinbox.setValue(50)
         self.image_opacity_spinbox.setSuffix(" %")
         image_layout.addRow("透明度:", self.image_opacity_spinbox)
+        
+        # 图片水印旋转
+        image_rotation_layout = QHBoxLayout()
+        self.image_rotation_slider = QSlider(Qt.Horizontal)
+        self.image_rotation_slider.setRange(0, 360)
+        self.image_rotation_slider.setValue(0)
+        self.image_rotation_label = QLabel("0°")
+        self.image_rotation_slider.valueChanged.connect(
+            lambda v: self.image_rotation_label.setText(f"{v}°"))
+        image_rotation_layout.addWidget(self.image_rotation_slider)
+        image_rotation_layout.addWidget(self.image_rotation_label)
+        image_layout.addRow("旋转:", image_rotation_layout)
         
         image_group.setLayout(image_layout)
         self.control_layout.addWidget(image_group)
@@ -454,23 +478,27 @@ class MainWindow(QMainWindow):
                         self.watermark_color.green(), 
                         self.watermark_color.blue(), 
                         self.watermark_color.alpha())
+                rotation = self.text_rotation_slider.value()
                 
                 image = self.image_processor.add_text_watermark(
                     image, text, position,
                     font_size=font_size,
                     color=color,
-                    opacity=opacity
+                    opacity=opacity,
+                    rotation=rotation
                 )
                 
             # 应用图片水印
             if use_image:
                 scale = self.scale_spinbox.value()
                 opacity = self.image_opacity_spinbox.value()
+                rotation = self.image_rotation_slider.value()
                 
                 image = self.image_processor.add_image_watermark(
                     image, self.current_watermark_image, position,
                     scale=scale,
-                    opacity=opacity
+                    opacity=opacity,
+                    rotation=rotation
                 )
                 
             # 保存处理后的图像
