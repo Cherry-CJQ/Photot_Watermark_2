@@ -268,15 +268,15 @@ class ImageProcessor:
             # 添加阴影效果
             if shadow:
                 # 增强阴影效果：更明显
-                shadow_color = (0, 0, 0, 255)  # 较深的黑色阴影
-                shadow_offset = 8  # 更大的偏移量
+                shadow_color = (0, 0, 0, 200)  # 较深的黑色阴影
+                shadow_offset = 4  # 更大的偏移量
                 # 绘制阴影文本
                 draw.text((draw_x + shadow_offset, draw_y + shadow_offset), text, font=font, fill=shadow_color)
             
             # 绘制主文本 - 增强粗体和斜体效果
             if bold:
                 # 增强粗体效果：在更大范围内绘制
-                for offset in range(-2, 3):
+                for offset in range(-1, 2):
                     draw.text((draw_x + offset, draw_y), text, font=font, fill=color)
                     if offset != 0:  # 避免重复绘制中心位置
                         draw.text((draw_x, draw_y + offset), text, font=font, fill=color)
