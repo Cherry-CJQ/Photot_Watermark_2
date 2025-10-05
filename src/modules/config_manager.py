@@ -47,7 +47,9 @@ class ConfigManager:
                 },
                 "last_export_dir": "",
                 "last_import_dir": "",
-                "auto_save_template": True
+                "auto_save_template": True,
+                "auto_load_last_template": True,
+                "last_template": ""
             },
             "watermark": {
                 "text": {
@@ -62,7 +64,8 @@ class ConfigManager:
                     "opacity": 50,
                     "rotation": 0
                 },
-                "position": "top-left"
+                "position": "top-left",
+                "last_template": ""
             },
             "export": {
                 "format": "JPEG",
@@ -245,6 +248,47 @@ class ConfigManager:
             模板名称列表
         """
         return list(self.templates.keys())
+    
+    def get_last_template_name(self):
+        """
+        获取上一次使用的模板名称
+        
+        Returns:
+            模板名称，如果没有则返回None
+        """
+        return self.get_setting("app.last_template", "")
+    
+    def set_last_template_name(self, template_name):
+        """
+        设置上一次使用的模板名称
+        
+        Args:
+            template_name: 模板名称
+        """
+        self.set_setting("app.last_template", template_name)
+        self.save_config()
+    
+    def should_auto_load_last_template(self):
+        """
+        检查是否应该自动加载上一次模板
+        
+        Returns:
+            bool: 是否应该自动加载
+        """
+        return self.get_setting("app.auto_load_last_template", True)
+    
+    def get_default_template_name(self):
+        """
+        获取默认模板名称
+        
+        Returns:
+            默认模板名称，如果没有则返回None
+        """
+        # 如果有模板，返回第一个模板名称
+        template_names = self.get_template_names()
+        if template_names:
+            return template_names[0]
+        return None
     
     def create_watermark_template(self, text_settings, image_settings, position_settings):
         """

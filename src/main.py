@@ -43,6 +43,7 @@ class MainWindow(QMainWindow):
         self.processed_image = None  # 处理后的图像
         self.init_ui()
         self.load_initial_settings()
+        self.auto_load_template()
         
     def init_ui(self):
         """
@@ -1328,6 +1329,103 @@ class MainWindow(QMainWindow):
         except Exception as e:
             print(f"加载初始设置失败: {e}")
             
+    def auto_load_template(self):
+        """
+        自动加载上一次使用的模板或默认模板
+        """
+        try:
+            # 检查是否应该自动加载模板
+            if not self.config_manager.should_auto_load_last_template():
+                return
+                
+            # 获取上一次使用的模板名称
+            last_template_name = self.config_manager.get_last_template_name()
+            
+            # 如果存在上一次使用的模板，尝试加载
+            if last_template_name and last_template_name in self.config_manager.get_template_names():
+                try:
+                    self.load_template_by_name(last_template_name)
+                    self.status_bar.showMessage(f'已自动加载上一次使用的模板: {last_template_name}')
+                    return
+                except Exception as e:
+                    print(f"自动加载上一次模板失败: {e}")
+            
+            # 如果没有上一次模板，尝试加载默认模板
+            default_template_name = self.config_manager.get_default_template_name()
+            if default_template_name:
+                try:
+                    self.load_template_by_name(default_template_name)
+                    self.status_bar.showMessage(f'已自动加载默认模板: {default_template_name}')
+                except Exception as e:
+                    print(f"自动加载默认模板失败: {e}")
+                    
+        except Exception as e:
+            print(f"自动加载模板失败: {e}")
+            
+    def load_template_by_name(self, template_name):
+        """
+        按名称加载模板
+        
+        Args:
+            template_name: 模板名称
+        """
+        try:
+            template_data = self.config_manager.load_template(template_name)
+            
+            # 应用文本设置
+            if "text" in template_data:
+                text_settings = template_data["text"]
+                self.text_input.setText(text_settings.get("content", "水印文本"))
+                self.font_size_spinbox.setValue(text_settings.get("font_size", 20))
+                
+                color_data = text_settings.get("color", [255, 255, 255, 128])
+                self.watermark_color = QColor(color_data[0], color_data[1], color_data[2], color_data[3])
+                self.color_preview.setStyleSheet(
+                    f"background-color: rgba({color_data[0]}, {color_data[1]}, {color_data[2]}, {color_data[3]}); border: 1px solid black;"
+                )
+                
+                self.text_opacity_spinbox.setValue(text_settings.get("opacity", 50))
+                self.text_rotation_slider.setValue(text_settings.get("rotation", 0))
+                
+                # 应用字体设置
+                font_family = text_settings.get("font_family", "")
+                if font_family:
+                    index = self.font_combo.findText(font_family)
+                    if index >= 0:
+                        self.font_combo.setCurrentIndex(index)
+                
+                self.bold_checkbox.setChecked(text_settings.get("bold", False))
+                self.italic_checkbox.setChecked(text_settings.get("italic", False))
+                
+                # 应用效果设置
+                self.outline_checkbox.setChecked(text_settings.get("outline", False))
+                self.shadow_checkbox.setChecked(text_settings.get("shadow", False))
+            
+            # 应用图片设置
+            if "image" in template_data:
+                image_settings = template_data["image"]
+                self.scale_spinbox.setValue(image_settings.get("scale", 1.0))
+                self.image_opacity_spinbox.setValue(image_settings.get("opacity", 50))
+                self.image_rotation_slider.setValue(image_settings.get("rotation", 0))
+            
+            # 应用位置设置
+            if "position" in template_data:
+                position = template_data["position"]
+                index = self.position_combo.findText(position)
+                if index >= 0:
+                    self.position_combo.setCurrentIndex(index)
+                    
+            # 更新模板选择框
+            index = self.template_combo.findText(template_name)
+            if index >= 0:
+                self.template_combo.setCurrentIndex(index)
+                
+            # 记录为上一次使用的模板
+            self.config_manager.set_last_template_name(template_name)
+            
+        except Exception as e:
+            raise Exception(f"加载模板失败: {str(e)}")
+            
     def save_current_settings(self):
         """
         保存当前设置
@@ -1442,51 +1540,11 @@ class MainWindow(QMainWindow):
             return
             
         try:
-            template_data = self.config_manager.load_template(template_name)
+            self.load_template_by_name(template_name)
             
-            # 应用文本设置
-            if "text" in template_data:
-                text_settings = template_data["text"]
-                self.text_input.setText(text_settings.get("content", "水印文本"))
-                self.font_size_spinbox.setValue(text_settings.get("font_size", 20))
-                
-                color_data = text_settings.get("color", [255, 255, 255, 128])
-                self.watermark_color = QColor(color_data[0], color_data[1], color_data[2], color_data[3])
-                self.color_preview.setStyleSheet(
-                    f"background-color: rgba({color_data[0]}, {color_data[1]}, {color_data[2]}, {color_data[3]}); border: 1px solid black;"
-                )
-                
-                self.text_opacity_spinbox.setValue(text_settings.get("opacity", 50))
-                self.text_rotation_slider.setValue(text_settings.get("rotation", 0))
-                
-                # 应用字体设置
-                font_family = text_settings.get("font_family", "")
-                if font_family:
-                    index = self.font_combo.findText(font_family)
-                    if index >= 0:
-                        self.font_combo.setCurrentIndex(index)
-                
-                self.bold_checkbox.setChecked(text_settings.get("bold", False))
-                self.italic_checkbox.setChecked(text_settings.get("italic", False))
-                
-                # 应用效果设置
-                self.outline_checkbox.setChecked(text_settings.get("outline", False))
-                self.shadow_checkbox.setChecked(text_settings.get("shadow", False))
+            # 记录为上一次使用的模板
+            self.config_manager.set_last_template_name(template_name)
             
-            # 应用图片设置
-            if "image" in template_data:
-                image_settings = template_data["image"]
-                self.scale_spinbox.setValue(image_settings.get("scale", 1.0))
-                self.image_opacity_spinbox.setValue(image_settings.get("opacity", 50))
-                self.image_rotation_slider.setValue(image_settings.get("rotation", 0))
-            
-            # 应用位置设置
-            if "position" in template_data:
-                position = template_data["position"]
-                index = self.position_combo.findText(position)
-                if index >= 0:
-                    self.position_combo.setCurrentIndex(index)
-                    
             # 自动应用水印到当前图片
             if self.current_image_index >= 0:
                 self.apply_watermark()
