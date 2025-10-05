@@ -7,11 +7,12 @@ Photot Watermark Tool 主程序文件
 
 import sys
 import os
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QPushButton, QLabel, QListWidget,
                              QFileDialog, QToolBar, QAction, QStatusBar, QListWidgetItem,
                              QGroupBox, QFormLayout, QLineEdit, QSpinBox, QDoubleSpinBox,
-                             QComboBox, QColorDialog, QMessageBox, QSlider)
+                             QComboBox, QColorDialog, QMessageBox, QSlider, QInputDialog,
+                             QDialog, QDialogButtonBox, QCheckBox)
 from PyQt5.QtCore import Qt, QSize
 from PyQt5.QtGui import QIcon, QPixmap, QImage, QColor
 from PIL import Image
@@ -21,6 +22,7 @@ import numpy as np
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from modules.image_processor import ImageProcessor
+from modules.config_manager import ConfigManager
 
 class MainWindow(QMainWindow):
     """
@@ -35,10 +37,12 @@ class MainWindow(QMainWindow):
         self.image_files = []  # 存储导入的图片文件路径
         self.current_image_index = -1  # 当前选中的图片索引
         self.image_processor = ImageProcessor()  # 图像处理器
+        self.config_manager = ConfigManager()  # 配置管理器
         self.current_watermark_image = None  # 当前水印图片
         self.watermark_color = QColor(255, 255, 255, 128)  # 默认水印颜色
         self.processed_image = None  # 处理后的图像
         self.init_ui()
+        self.load_initial_settings()
         
     def init_ui(self):
         """
@@ -260,6 +264,46 @@ class MainWindow(QMainWindow):
         position_group.setLayout(position_layout)
         self.control_layout.addWidget(position_group)
         
+        # 添加模板管理组
+        self.create_template_controls()
+        
+    def create_template_controls(self):
+        """
+        创建模板管理组件
+        """
+        template_group = QGroupBox("模板管理")
+        template_layout = QVBoxLayout()
+        
+        # 模板选择
+        template_select_layout = QHBoxLayout()
+        self.template_combo = QComboBox()
+        self.template_combo.addItem("-- 选择模板 --")
+        self.refresh_template_list()
+        template_select_layout.addWidget(QLabel("模板:"))
+        template_select_layout.addWidget(self.template_combo)
+        template_select_layout.addStretch()
+        template_layout.addLayout(template_select_layout)
+        
+        # 模板操作按钮
+        template_buttons_layout = QHBoxLayout()
+        
+        self.save_template_button = QPushButton("保存模板")
+        self.save_template_button.clicked.connect(self.save_template)
+        template_buttons_layout.addWidget(self.save_template_button)
+        
+        self.load_template_button = QPushButton("加载模板")
+        self.load_template_button.clicked.connect(self.load_template)
+        template_buttons_layout.addWidget(self.load_template_button)
+        
+        self.delete_template_button = QPushButton("删除模板")
+        self.delete_template_button.clicked.connect(self.delete_template)
+        template_buttons_layout.addWidget(self.delete_template_button)
+        
+        template_layout.addLayout(template_buttons_layout)
+        
+        template_group.setLayout(template_layout)
+        self.control_layout.addWidget(template_group)
+        
     def create_menus_and_toolbar(self):
         """
         创建菜单栏和工具栏
@@ -284,8 +328,27 @@ class MainWindow(QMainWindow):
         
         exit_action = QAction('退出', self)
         exit_action.setShortcut('Ctrl+Q')
-        exit_action.triggered.connect(self.close)
+        exit_action.triggered.connect(self.close_application)
         file_menu.addAction(exit_action)
+        
+        # 模板菜单
+        template_menu = menubar.addMenu('模板')
+        
+        save_template_action = QAction('保存模板', self)
+        save_template_action.setShortcut('Ctrl+S')
+        save_template_action.triggered.connect(self.save_template)
+        template_menu.addAction(save_template_action)
+        
+        load_template_action = QAction('加载模板', self)
+        load_template_action.setShortcut('Ctrl+L')
+        load_template_action.triggered.connect(self.load_template)
+        template_menu.addAction(load_template_action)
+        
+        template_menu.addSeparator()
+        
+        manage_templates_action = QAction('管理模板', self)
+        manage_templates_action.triggered.connect(self.manage_templates)
+        template_menu.addAction(manage_templates_action)
         
         # 创建工具栏
         toolbar = self.addToolBar('工具栏')
@@ -404,12 +467,177 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage('请先导入图片')
             return
             
-        # 选择导出目录
-        export_dir = QFileDialog.getExistingDirectory(self, '选择导出目录')
-        if export_dir:
-            self.status_bar.showMessage(f'导出功能待实现，目录: {export_dir}')
-        else:
+        # 显示导出设置对话框
+        export_dialog = ExportSettingsDialog(self)
+        if export_dialog.exec_() != QDialog.Accepted:
             self.status_bar.showMessage('导出已取消')
+            return
+            
+        # 获取导出设置
+        export_settings = export_dialog.get_export_settings()
+        export_dialog.save_settings()
+        
+        # 获取上次导出目录
+        last_export_dir = self.config_manager.get_setting("export.last_export_dir", "")
+        
+        # 选择导出目录
+        export_dir = QFileDialog.getExistingDirectory(
+            self,
+            '选择导出目录',
+            last_export_dir
+        )
+        
+        if not export_dir:
+            self.status_bar.showMessage('导出已取消')
+            return
+            
+        # 检查是否导出到源文件夹
+        source_dirs = set(os.path.dirname(path) for path in self.image_files)
+        if export_dir in source_dirs:
+            # 默认创建 "_watermark" 子文件夹
+            watermark_dir = os.path.join(export_dir, "_watermark")
+            if not os.path.exists(watermark_dir):
+                os.makedirs(watermark_dir)
+            
+            reply = QMessageBox.information(
+                self, "导出目录调整",
+                f"为防止覆盖原图，已自动创建子文件夹 '_watermark'。\n导出目录已调整为:\n{watermark_dir}\n\n是否继续导出？",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes
+            )
+            if reply == QMessageBox.Yes:
+                export_dir = watermark_dir
+            else:
+                self.status_bar.showMessage('导出已取消')
+                return
+        
+        try:
+            # 保存导出目录
+            self.config_manager.set_setting("export.last_export_dir", export_dir)
+            self.config_manager.save_config()
+            
+            # 导出所有图片
+            success_count = 0
+            total_count = len(self.image_files)
+            
+            for i, image_path in enumerate(self.image_files):
+                try:
+                    # 生成输出文件名
+                    original_name = os.path.basename(image_path)
+                    name, ext = os.path.splitext(original_name)
+                    
+                    naming_rule = export_settings["naming_rule"]
+                    if naming_rule == "添加前缀":
+                        output_name = f"{export_settings['prefix']}{original_name}"
+                    elif naming_rule == "添加后缀":
+                        output_name = f"{name}{export_settings['suffix']}{ext}"
+                    else:  # 保留原文件名
+                        output_name = original_name
+                    
+                    # 确定文件格式和扩展名
+                    export_format = export_settings["format"]
+                    if export_format == "JPEG":
+                        output_ext = ".jpg"
+                        file_format = "JPEG"
+                    else:  # PNG
+                        output_ext = ".png"
+                        file_format = "PNG"
+                    
+                    # 如果扩展名不匹配，则替换
+                    if not output_name.lower().endswith(output_ext.lower()):
+                        output_name = os.path.splitext(output_name)[0] + output_ext
+                    
+                    output_path = os.path.join(export_dir, output_name)
+                    
+                    # 检查文件是否已存在
+                    if os.path.exists(output_path):
+                        reply = QMessageBox.question(
+                            self, "文件已存在",
+                            f"文件 {output_name} 已存在，是否覆盖？",
+                            QMessageBox.Yes | QMessageBox.No,
+                            QMessageBox.No
+                        )
+                        if reply == QMessageBox.No:
+                            continue
+                    
+                    # 加载并处理图片
+                    image = self.image_processor.load_image(image_path)
+                    
+                    # 应用当前水印设置
+                    use_text = bool(self.text_input.text().strip())
+                    use_image = self.current_watermark_image is not None
+                    
+                    if use_text or use_image:
+                        position = self.position_combo.currentText()
+                        
+                        # 应用文本水印
+                        if use_text:
+                            text = self.text_input.text()
+                            font_size = self.font_size_spinbox.value()
+                            opacity = self.text_opacity_spinbox.value()
+                            color = (self.watermark_color.red(),
+                                    self.watermark_color.green(),
+                                    self.watermark_color.blue(),
+                                    self.watermark_color.alpha())
+                            rotation = self.text_rotation_slider.value()
+                            
+                            image = self.image_processor.add_text_watermark(
+                                image, text, position,
+                                font_size=font_size,
+                                color=color,
+                                opacity=opacity,
+                                rotation=rotation
+                            )
+                        
+                        # 应用图片水印
+                        if use_image:
+                            scale = self.scale_spinbox.value()
+                            opacity = self.image_opacity_spinbox.value()
+                            rotation = self.image_rotation_slider.value()
+                            
+                            image = self.image_processor.add_image_watermark(
+                                image, self.current_watermark_image, position,
+                                scale=scale,
+                                opacity=opacity,
+                                rotation=rotation
+                            )
+                    
+                    # 调整图片尺寸
+                    if export_settings["resize_enabled"]:
+                        img_width, img_height = image.size
+                        max_width = export_settings["max_width"]
+                        max_height = export_settings["max_height"]
+                        if img_width > max_width or img_height > max_height:
+                            # 计算新的尺寸，保持宽高比
+                            ratio = min(max_width / img_width, max_height / img_height)
+                            new_width = int(img_width * ratio)
+                            new_height = int(img_height * ratio)
+                            image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                    
+                    # 保存图片
+                    quality = export_settings["quality"]
+                    self.image_processor.save_image(image, output_path, quality=quality, file_format=file_format)
+                    success_count += 1
+                    
+                    # 更新状态
+                    self.status_bar.showMessage(f'正在导出: {i+1}/{total_count} - {output_name}')
+                    
+                except Exception as e:
+                    print(f"导出图片 {image_path} 失败: {e}")
+                    QMessageBox.warning(self, "导出错误", f"导出图片 {os.path.basename(image_path)} 失败: {str(e)}")
+            
+            # 显示导出结果
+            if success_count > 0:
+                self.status_bar.showMessage(f'导出完成: {success_count}/{total_count} 张图片已导出到 {export_dir}')
+                QMessageBox.information(self, "导出完成",
+                                      f"成功导出 {success_count}/{total_count} 张图片到:\n{export_dir}")
+            else:
+                self.status_bar.showMessage('导出失败: 没有图片被导出')
+                QMessageBox.warning(self, "导出失败", "没有图片被导出")
+                
+        except Exception as e:
+            self.status_bar.showMessage(f'导出失败: {str(e)}')
+            QMessageBox.warning(self, "导出错误", f"导出失败: {str(e)}")
             
     def select_color(self):
         """
@@ -540,7 +768,438 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self.preview_label.setText(f'无法显示处理后的图片: {str(e)}')
             print(f"显示处理后的图片失败: {e}")
+            
+    def load_initial_settings(self):
+        """
+        加载初始设置
+        """
+        try:
+            # 加载窗口设置
+            width = self.config_manager.get_setting("app.window_geometry.width", 1200)
+            height = self.config_manager.get_setting("app.window_geometry.height", 700)
+            x = self.config_manager.get_setting("app.window_geometry.x", 100)
+            y = self.config_manager.get_setting("app.window_geometry.y", 100)
+            self.setGeometry(x, y, width, height)
+            
+            # 加载水印设置
+            text_content = self.config_manager.get_setting("watermark.text.content", "水印文本")
+            self.text_input.setText(text_content)
+            
+            font_size = self.config_manager.get_setting("watermark.text.font_size", 24)
+            self.font_size_spinbox.setValue(font_size)
+            
+            color_data = self.config_manager.get_setting("watermark.text.color", [255, 255, 255, 128])
+            self.watermark_color = QColor(color_data[0], color_data[1], color_data[2], color_data[3])
+            self.color_preview.setStyleSheet(
+                f"background-color: rgba({color_data[0]}, {color_data[1]}, {color_data[2]}, {color_data[3]}); border: 1px solid black;"
+            )
+            
+            text_opacity = self.config_manager.get_setting("watermark.text.opacity", 50)
+            self.text_opacity_spinbox.setValue(text_opacity)
+            
+            text_rotation = self.config_manager.get_setting("watermark.text.rotation", 0)
+            self.text_rotation_slider.setValue(text_rotation)
+            
+            image_scale = self.config_manager.get_setting("watermark.image.scale", 1.0)
+            self.scale_spinbox.setValue(image_scale)
+            
+            image_opacity = self.config_manager.get_setting("watermark.image.opacity", 50)
+            self.image_opacity_spinbox.setValue(image_opacity)
+            
+            image_rotation = self.config_manager.get_setting("watermark.image.rotation", 0)
+            self.image_rotation_slider.setValue(image_rotation)
+            
+            position = self.config_manager.get_setting("watermark.position", "top-left")
+            index = self.position_combo.findText(position)
+            if index >= 0:
+                self.position_combo.setCurrentIndex(index)
+                
+        except Exception as e:
+            print(f"加载初始设置失败: {e}")
+            
+    def save_current_settings(self):
+        """
+        保存当前设置
+        """
+        try:
+            # 保存窗口设置
+            geometry = self.geometry()
+            self.config_manager.set_setting("app.window_geometry.width", geometry.width())
+            self.config_manager.set_setting("app.window_geometry.height", geometry.height())
+            self.config_manager.set_setting("app.window_geometry.x", geometry.x())
+            self.config_manager.set_setting("app.window_geometry.y", geometry.y())
+            
+            # 保存水印设置
+            self.config_manager.set_setting("watermark.text.content", self.text_input.text())
+            self.config_manager.set_setting("watermark.text.font_size", self.font_size_spinbox.value())
+            self.config_manager.set_setting("watermark.text.color", [
+                self.watermark_color.red(),
+                self.watermark_color.green(),
+                self.watermark_color.blue(),
+                self.watermark_color.alpha()
+            ])
+            self.config_manager.set_setting("watermark.text.opacity", self.text_opacity_spinbox.value())
+            self.config_manager.set_setting("watermark.text.rotation", self.text_rotation_slider.value())
+            
+            self.config_manager.set_setting("watermark.image.scale", self.scale_spinbox.value())
+            self.config_manager.set_setting("watermark.image.opacity", self.image_opacity_spinbox.value())
+            self.config_manager.set_setting("watermark.image.rotation", self.image_rotation_slider.value())
+            
+            self.config_manager.set_setting("watermark.position", self.position_combo.currentText())
+            
+            # 保存配置
+            self.config_manager.save_config()
+            
+        except Exception as e:
+            print(f"保存设置失败: {e}")
+            
+    def refresh_template_list(self):
+        """
+        刷新模板列表
+        """
+        self.template_combo.clear()
+        self.template_combo.addItem("-- 选择模板 --")
+        
+        template_names = self.config_manager.get_template_names()
+        for name in template_names:
+            self.template_combo.addItem(name)
+            
+    def save_template(self):
+        """
+        保存当前设置为模板
+        """
+        template_name, ok = QInputDialog.getText(self, '保存模板', '请输入模板名称:')
+        if ok and template_name:
+            try:
+                # 收集当前设置
+                text_settings = {
+                    "content": self.text_input.text(),
+                    "font_size": self.font_size_spinbox.value(),
+                    "color": [
+                        self.watermark_color.red(),
+                        self.watermark_color.green(),
+                        self.watermark_color.blue(),
+                        self.watermark_color.alpha()
+                    ],
+                    "opacity": self.text_opacity_spinbox.value(),
+                    "rotation": self.text_rotation_slider.value()
+                }
+                
+                image_settings = {
+                    "scale": self.scale_spinbox.value(),
+                    "opacity": self.image_opacity_spinbox.value(),
+                    "rotation": self.image_rotation_slider.value()
+                }
+                
+                position_settings = self.position_combo.currentText()
+                
+                # 创建模板数据
+                template_data = self.config_manager.create_watermark_template(
+                    text_settings, image_settings, position_settings
+                )
+                
+                # 保存模板
+                self.config_manager.save_template(template_name, template_data)
+                self.refresh_template_list()
+                
+                QMessageBox.information(self, "成功", f"模板 '{template_name}' 已保存")
+                
+            except Exception as e:
+                QMessageBox.warning(self, "错误", f"保存模板失败: {str(e)}")
+                
+    def load_template(self):
+        """
+        加载选中的模板
+        """
+        template_name = self.template_combo.currentText()
+        if template_name == "-- 选择模板 --":
+            QMessageBox.warning(self, "警告", "请先选择一个模板")
+            return
+            
+        try:
+            template_data = self.config_manager.load_template(template_name)
+            
+            # 应用文本设置
+            if "text" in template_data:
+                text_settings = template_data["text"]
+                self.text_input.setText(text_settings.get("content", "水印文本"))
+                self.font_size_spinbox.setValue(text_settings.get("font_size", 24))
+                
+                color_data = text_settings.get("color", [255, 255, 255, 128])
+                self.watermark_color = QColor(color_data[0], color_data[1], color_data[2], color_data[3])
+                self.color_preview.setStyleSheet(
+                    f"background-color: rgba({color_data[0]}, {color_data[1]}, {color_data[2]}, {color_data[3]}); border: 1px solid black;"
+                )
+                
+                self.text_opacity_spinbox.setValue(text_settings.get("opacity", 50))
+                self.text_rotation_slider.setValue(text_settings.get("rotation", 0))
+            
+            # 应用图片设置
+            if "image" in template_data:
+                image_settings = template_data["image"]
+                self.scale_spinbox.setValue(image_settings.get("scale", 1.0))
+                self.image_opacity_spinbox.setValue(image_settings.get("opacity", 50))
+                self.image_rotation_slider.setValue(image_settings.get("rotation", 0))
+            
+            # 应用位置设置
+            if "position" in template_data:
+                position = template_data["position"]
+                index = self.position_combo.findText(position)
+                if index >= 0:
+                    self.position_combo.setCurrentIndex(index)
+                    
+            QMessageBox.information(self, "成功", f"模板 '{template_name}' 已加载")
+            
+        except Exception as e:
+            QMessageBox.warning(self, "错误", f"加载模板失败: {str(e)}")
+            
+    def delete_template(self):
+        """
+        删除选中的模板
+        """
+        template_name = self.template_combo.currentText()
+        if template_name == "-- 选择模板 --":
+            QMessageBox.warning(self, "警告", "请先选择一个模板")
+            return
+            
+        reply = QMessageBox.question(self, "确认删除",
+                                   f"确定要删除模板 '{template_name}' 吗？",
+                                   QMessageBox.Yes | QMessageBox.No,
+                                   QMessageBox.No)
+        
+        if reply == QMessageBox.Yes:
+            try:
+                self.config_manager.delete_template(template_name)
+                self.refresh_template_list()
+                QMessageBox.information(self, "成功", f"模板 '{template_name}' 已删除")
+            except Exception as e:
+                QMessageBox.warning(self, "错误", f"删除模板失败: {str(e)}")
+                
+    def manage_templates(self):
+        """
+        管理模板对话框
+        """
+        # TODO: 实现模板管理对话框
+        QMessageBox.information(self, "模板管理", "模板管理功能正在开发中...")
+        
+    def close_application(self):
+        """
+        关闭应用程序
+        """
+        self.save_current_settings()
+        self.close()
 
+class ExportSettingsDialog(QDialog):
+    """
+    导出设置对话框
+    """
+    
+    def __init__(self, parent=None):
+        """
+        初始化导出设置对话框
+        """
+        super().__init__(parent)
+        self.config_manager = parent.config_manager if parent else ConfigManager()
+        self.init_ui()
+        self.load_settings()
+        
+    def init_ui(self):
+        """
+        初始化用户界面
+        """
+        self.setWindowTitle("导出设置")
+        self.setModal(True)
+        self.resize(500, 400)
+        
+        layout = QVBoxLayout(self)
+        
+        # 导出格式设置
+        format_group = QGroupBox("导出格式")
+        format_layout = QFormLayout()
+        
+        self.format_combo = QComboBox()
+        self.format_combo.addItems(["JPEG", "PNG"])
+        format_layout.addRow("格式:", self.format_combo)
+        
+        self.quality_slider = QSlider(Qt.Horizontal)
+        self.quality_slider.setRange(0, 100)
+        self.quality_slider.setValue(95)
+        self.quality_label = QLabel("95%")
+        self.quality_slider.valueChanged.connect(
+            lambda v: self.quality_label.setText(f"{v}%"))
+        
+        quality_layout = QHBoxLayout()
+        quality_layout.addWidget(self.quality_slider)
+        quality_layout.addWidget(self.quality_label)
+        format_layout.addRow("JPEG质量:", quality_layout)
+        
+        format_group.setLayout(format_layout)
+        layout.addWidget(format_group)
+        
+        # 文件命名规则
+        naming_group = QGroupBox("文件命名")
+        naming_layout = QFormLayout()
+        
+        self.naming_combo = QComboBox()
+        self.naming_combo.addItems([
+            "保留原文件名",
+            "添加前缀",
+            "添加后缀"
+        ])
+        self.naming_combo.currentTextChanged.connect(self.on_naming_rule_changed)
+        naming_layout.addRow("命名规则:", self.naming_combo)
+        
+        self.prefix_input = QLineEdit("wm_")
+        naming_layout.addRow("前缀:", self.prefix_input)
+        
+        self.suffix_input = QLineEdit("_watermarked")
+        naming_layout.addRow("后缀:", self.suffix_input)
+        
+        naming_group.setLayout(naming_layout)
+        layout.addWidget(naming_group)
+        
+        # 图片尺寸调整
+        resize_group = QGroupBox("图片尺寸调整")
+        resize_layout = QFormLayout()
+        
+        self.resize_checkbox = QCheckBox("启用尺寸调整")
+        self.resize_checkbox.toggled.connect(self.on_resize_toggled)
+        resize_layout.addRow(self.resize_checkbox)
+        
+        self.max_width_spinbox = QSpinBox()
+        self.max_width_spinbox.setRange(100, 10000)
+        self.max_width_spinbox.setValue(1920)
+        self.max_width_spinbox.setSuffix(" px")
+        resize_layout.addRow("最大宽度:", self.max_width_spinbox)
+        
+        self.max_height_spinbox = QSpinBox()
+        self.max_height_spinbox.setRange(100, 10000)
+        self.max_height_spinbox.setValue(1080)
+        self.max_height_spinbox.setSuffix(" px")
+        resize_layout.addRow("最大高度:", self.max_height_spinbox)
+        
+        resize_group.setLayout(resize_layout)
+        layout.addWidget(resize_group)
+        
+        # 按钮
+        button_layout = QHBoxLayout()
+        self.ok_button = QPushButton("确定")
+        self.ok_button.clicked.connect(self.accept)
+        self.cancel_button = QPushButton("取消")
+        self.cancel_button.clicked.connect(self.reject)
+        
+        button_layout.addStretch()
+        button_layout.addWidget(self.ok_button)
+        button_layout.addWidget(self.cancel_button)
+        
+        layout.addLayout(button_layout)
+        
+        # 初始状态
+        self.on_naming_rule_changed(self.naming_combo.currentText())
+        self.on_resize_toggled(self.resize_checkbox.isChecked())
+        
+    def on_naming_rule_changed(self, rule):
+        """
+        命名规则改变时的处理
+        """
+        is_prefix = rule == "添加前缀"
+        is_suffix = rule == "添加后缀"
+        
+        self.prefix_input.setEnabled(is_prefix)
+        self.suffix_input.setEnabled(is_suffix)
+        
+    def on_resize_toggled(self, enabled):
+        """
+        尺寸调整开关状态改变时的处理
+        """
+        self.max_width_spinbox.setEnabled(enabled)
+        self.max_height_spinbox.setEnabled(enabled)
+        
+    def load_settings(self):
+        """
+        加载导出设置
+        """
+        try:
+            export_format = self.config_manager.get_setting("export.format", "JPEG")
+            index = self.format_combo.findText(export_format)
+            if index >= 0:
+                self.format_combo.setCurrentIndex(index)
+                
+            quality = self.config_manager.get_setting("export.quality", 95)
+            self.quality_slider.setValue(quality)
+            
+            naming_rule = self.config_manager.get_setting("export.naming_rule", "original")
+            if naming_rule == "prefix":
+                self.naming_combo.setCurrentText("添加前缀")
+            elif naming_rule == "suffix":
+                self.naming_combo.setCurrentText("添加后缀")
+            else:
+                self.naming_combo.setCurrentText("保留原文件名")
+                
+            prefix = self.config_manager.get_setting("export.prefix", "wm_")
+            self.prefix_input.setText(prefix)
+            
+            suffix = self.config_manager.get_setting("export.suffix", "_watermarked")
+            self.suffix_input.setText(suffix)
+            
+            resize_enabled = self.config_manager.get_setting("export.resize_enabled", False)
+            self.resize_checkbox.setChecked(resize_enabled)
+            
+            max_width = self.config_manager.get_setting("export.max_width", 1920)
+            self.max_width_spinbox.setValue(max_width)
+            
+            max_height = self.config_manager.get_setting("export.max_height", 1080)
+            self.max_height_spinbox.setValue(max_height)
+            
+        except Exception as e:
+            print(f"加载导出设置失败: {e}")
+            
+    def save_settings(self):
+        """
+        保存导出设置
+        """
+        try:
+            # 保存格式设置
+            self.config_manager.set_setting("export.format", self.format_combo.currentText())
+            self.config_manager.set_setting("export.quality", self.quality_slider.value())
+            
+            # 保存命名规则
+            naming_rule = self.naming_combo.currentText()
+            if naming_rule == "添加前缀":
+                self.config_manager.set_setting("export.naming_rule", "prefix")
+            elif naming_rule == "添加后缀":
+                self.config_manager.set_setting("export.naming_rule", "suffix")
+            else:
+                self.config_manager.set_setting("export.naming_rule", "original")
+                
+            self.config_manager.set_setting("export.prefix", self.prefix_input.text())
+            self.config_manager.set_setting("export.suffix", self.suffix_input.text())
+            
+            # 保存尺寸设置
+            self.config_manager.set_setting("export.resize_enabled", self.resize_checkbox.isChecked())
+            self.config_manager.set_setting("export.max_width", self.max_width_spinbox.value())
+            self.config_manager.set_setting("export.max_height", self.max_height_spinbox.value())
+            
+            # 保存配置
+            self.config_manager.save_config()
+            
+        except Exception as e:
+            print(f"保存导出设置失败: {e}")
+            
+    def get_export_settings(self):
+        """
+        获取导出设置
+        """
+        return {
+            "format": self.format_combo.currentText(),
+            "quality": self.quality_slider.value(),
+            "naming_rule": self.naming_combo.currentText(),
+            "prefix": self.prefix_input.text(),
+            "suffix": self.suffix_input.text(),
+            "resize_enabled": self.resize_checkbox.isChecked(),
+            "max_width": self.max_width_spinbox.value(),
+            "max_height": self.max_height_spinbox.value()
+        }
 def main():
     """
     主函数

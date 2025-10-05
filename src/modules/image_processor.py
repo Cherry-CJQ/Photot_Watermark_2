@@ -79,10 +79,18 @@ class ImageProcessor:
             
             # 获取参数
             font_path = kwargs.get('font_path', None)
-            font_size = kwargs.get('font_size', 48)  # 默认字体大小改为48
+            base_font_size = kwargs.get('font_size', 48)  # 基础字体大小
             color = kwargs.get('color', (255, 255, 255, 200))  # 默认改为白色半透明，提高可见性
             opacity = kwargs.get('opacity', 80)  # 默认透明度改为80，确保在各种背景上都可见
             rotation = kwargs.get('rotation', 0)
+            
+            # 根据图片尺寸自适应调整字体大小
+            img_width, img_height = image.size
+            # 以图片宽度的1/20作为参考字体大小
+            adaptive_font_size = max(base_font_size, int(min(img_width, img_height) / 20))
+            # 确保字体大小在合理范围内
+            font_size = min(adaptive_font_size, 200)  # 最大200像素
+            print(f"自适应字体大小: {font_size} (基础: {base_font_size}, 图片尺寸: {img_width}x{img_height})")
             
             print(f"处理前颜色: {color}, 透明度: {opacity}")
             
