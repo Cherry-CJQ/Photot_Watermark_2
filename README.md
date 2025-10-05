@@ -13,7 +13,6 @@
 
 [![下载最新版本](https://img.shields.io/badge/Download-v1.0.1-blue)](https://github.com/Cherry-CJQ/Photot_Watermark_2/releases/latest)
 
-**直接下载**: [Photot_Watermark.exe](dist/Photot_Watermark.exe)
 
 直接从 [GitHub Releases](https://github.com/Cherry-CJQ/Photot_Watermark_2/releases/latest) 页面下载 `Photot_Watermark.exe` 文件，双击即可运行，无需安装任何依赖。
 
