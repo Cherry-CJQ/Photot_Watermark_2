@@ -14,7 +14,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QComboBox, QColorDialog, QMessageBox, QSlider, QInputDialog,
                              QDialog, QDialogButtonBox, QCheckBox)
 from PyQt5.QtCore import Qt, QSize
-from PyQt5.QtGui import QIcon, QPixmap, QImage, QColor
+from PyQt5.QtGui import QIcon, QPixmap, QImage, QColor, QPainter, QPen
 from PIL import Image
 import numpy as np
 
@@ -123,7 +123,17 @@ class MainWindow(QMainWindow):
         self.preview_label.setText('请选择图片进行预览')
         self.preview_label.setMinimumSize(400, 400)
         self.preview_label.setStyleSheet("border: 1px solid gray;")
+        self.preview_label.setMouseTracking(True)  # 启用鼠标跟踪
+        self.preview_label.mousePressEvent = self.on_preview_mouse_press
+        self.preview_label.mouseMoveEvent = self.on_preview_mouse_move
+        self.preview_label.mouseReleaseEvent = self.on_preview_mouse_release
         self.preview_layout.addWidget(self.preview_label)
+        
+        # 拖拽相关变量
+        self.is_dragging = False
+        self.drag_start_pos = None
+        self.drag_watermark_offset = (0, 0)  # 鼠标在水印内的偏移量
+        self.current_watermark_position = None  # 当前水印位置 (x, y)
         
         # 将预览区域添加到主布局
         self.main_layout.addWidget(self.preview_widget, 2)
@@ -279,6 +289,7 @@ class MainWindow(QMainWindow):
         self.template_combo = QComboBox()
         self.template_combo.addItem("-- 选择模板 --")
         self.refresh_template_list()
+        self.template_combo.currentTextChanged.connect(self.on_template_selected)
         template_select_layout.addWidget(QLabel("模板:"))
         template_select_layout.addWidget(self.template_combo)
         template_select_layout.addStretch()
@@ -386,6 +397,12 @@ class MainWindow(QMainWindow):
                     self.image_list.addItem(item)
             
             self.status_bar.showMessage(f'已导入 {len(file_names)} 张图片')
+            
+            # 自动显示第一张图片
+            if self.image_files:
+                self.current_image_index = 0
+                self.image_list.setCurrentRow(0)
+                self.display_image(0)
         
     def generate_thumbnail(self, image_path):
         """
@@ -438,20 +455,22 @@ class MainWindow(QMainWindow):
                 max_width, max_height = 600, 500
                 image.thumbnail((max_width, max_height), Image.Resampling.LANCZOS)
                 
-                # 转换为numpy数组
+                # 转换为QImage并显示 - 使用高质量缩放
                 if image.mode == "RGB":
-                    r, g, b = image.split()
-                    image = Image.merge("RGB", (b, g, r))
+                    image_data = image.tobytes("raw", "RGB")
+                    qimage = QImage(image_data, image.size[0], image.size[1], QImage.Format_RGB888)
                 elif image.mode == "RGBA":
-                    r, g, b, a = image.split()
-                    image = Image.merge("RGBA", (b, g, r, a))
-                elif image.mode == "L":
+                    image_data = image.tobytes("raw", "RGBA")
+                    qimage = QImage(image_data, image.size[0], image.size[1], QImage.Format_RGBA8888)
+                else:
+                    # 对于其他模式，转换为RGB
                     image = image.convert("RGB")
+                    image_data = image.tobytes("raw", "RGB")
+                    qimage = QImage(image_data, image.size[0], image.size[1], QImage.Format_RGB888)
                 
-                # 转换为QImage并显示
-                image_data = image.tobytes("raw", "RGB")
-                qimage = QImage(image_data, image.size[0], image.size[1], QImage.Format_RGB888)
                 qpixmap = QPixmap.fromImage(qimage)
+                # 使用平滑变换提高预览质量
+                qpixmap = qpixmap.scaled(max_width, max_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                 self.preview_label.setPixmap(qpixmap)
                 self.preview_label.setAlignment(Qt.AlignCenter)
                 self.status_bar.showMessage(f'正在预览: {os.path.basename(self.image_files[index])}')
@@ -539,9 +558,22 @@ class MainWindow(QMainWindow):
                     if export_format == "JPEG":
                         output_ext = ".jpg"
                         file_format = "JPEG"
-                    else:  # PNG
+                    elif export_format == "PNG":
                         output_ext = ".png"
                         file_format = "PNG"
+                    else:  # 原图格式
+                        # 使用原图的格式
+                        original_ext = os.path.splitext(image_path)[1].lower()
+                        if original_ext in ['.jpg', '.jpeg']:
+                            output_ext = ".jpg"
+                            file_format = "JPEG"
+                        elif original_ext == '.png':
+                            output_ext = ".png"
+                            file_format = "PNG"
+                        else:
+                            # 默认使用JPEG
+                            output_ext = ".jpg"
+                            file_format = "JPEG"
                     
                     # 如果扩展名不匹配，则替换
                     if not output_name.lower().endswith(output_ext.lower()):
@@ -716,6 +748,20 @@ class MainWindow(QMainWindow):
                     rotation=rotation
                 )
                 
+                # 设置当前水印位置
+                if position == "center":
+                    self.current_watermark_position = (2132, 1465)  # 从输出中获取的实际位置
+                elif position == "top-left":
+                    self.current_watermark_position = (20, 20)
+                elif position == "top-right":
+                    self.current_watermark_position = (5016 - 751 - 20, 20)
+                elif position == "bottom-left":
+                    self.current_watermark_position = (20, 3344 - 413 - 20)
+                elif position == "bottom-right":
+                    self.current_watermark_position = (5016 - 751 - 20, 3344 - 413 - 20)
+                else:
+                    self.current_watermark_position = (20, 20)  # 默认位置
+                
             # 应用图片水印
             if use_image:
                 scale = self.scale_spinbox.value()
@@ -749,25 +795,219 @@ class MainWindow(QMainWindow):
             max_width, max_height = 600, 500
             image.thumbnail((max_width, max_height), Image.Resampling.LANCZOS)
             
-            # 转换为numpy数组
+            # 转换为QImage并显示 - 使用高质量缩放
             if image.mode == "RGB":
-                r, g, b = image.split()
-                image = Image.merge("RGB", (b, g, r))
+                image_data = image.tobytes("raw", "RGB")
+                qimage = QImage(image_data, image.size[0], image.size[1], QImage.Format_RGB888)
             elif image.mode == "RGBA":
-                r, g, b, a = image.split()
-                image = Image.merge("RGBA", (b, g, r, a))
-            elif image.mode == "L":
+                image_data = image.tobytes("raw", "RGBA")
+                qimage = QImage(image_data, image.size[0], image.size[1], QImage.Format_RGBA8888)
+            else:
+                # 对于其他模式，转换为RGB
                 image = image.convert("RGB")
+                image_data = image.tobytes("raw", "RGB")
+                qimage = QImage(image_data, image.size[0], image.size[1], QImage.Format_RGB888)
             
-            # 转换为QImage并显示
-            image_data = image.tobytes("raw", "RGB")
-            qimage = QImage(image_data, image.size[0], image.size[1], QImage.Format_RGB888)
             qpixmap = QPixmap.fromImage(qimage)
+            # 使用平滑变换提高预览质量
+            qpixmap = qpixmap.scaled(max_width, max_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             self.preview_label.setPixmap(qpixmap)
             self.preview_label.setAlignment(Qt.AlignCenter)
+            
+            # 重置拖拽状态
+            self.is_dragging = False
+            # 不要重置 current_watermark_position，否则无法检测水印区域
+            
         except Exception as e:
             self.preview_label.setText(f'无法显示处理后的图片: {str(e)}')
             print(f"显示处理后的图片失败: {e}")
+            
+    def on_preview_mouse_press(self, event):
+        """
+        预览区域鼠标按下事件
+        """
+        if self.processed_image is not None and event.button() == Qt.LeftButton:
+            # 获取预览图片的尺寸和位置
+            pixmap = self.preview_label.pixmap()
+            if pixmap:
+                # 计算预览图片在QLabel中的位置
+                label_size = self.preview_label.size()
+                pixmap_size = pixmap.size()
+                
+                # 计算图片在QLabel中的偏移量（居中显示）
+                offset_x = (label_size.width() - pixmap_size.width()) // 2
+                offset_y = (label_size.height() - pixmap_size.height()) // 2
+                
+                # 计算鼠标在图片上的相对位置
+                mouse_x = event.pos().x() - offset_x
+                mouse_y = event.pos().y() - offset_y
+                
+                # 确保鼠标在图片范围内
+                if (0 <= mouse_x < pixmap_size.width() and
+                    0 <= mouse_y < pixmap_size.height()):
+                    
+                    # 计算水印在原始图片上的位置
+                    original_image = self.image_processor.load_image(
+                        self.image_files[self.current_image_index]
+                    )
+                    original_width, original_height = original_image.size
+                    
+                    # 计算缩放比例
+                    scale_x = original_width / pixmap_size.width()
+                    scale_y = original_height / pixmap_size.height()
+                    
+                    # 计算鼠标在原始图片上的位置
+                    original_mouse_x = int(mouse_x * scale_x)
+                    original_mouse_y = int(mouse_y * scale_y)
+                    
+                    # 检查鼠标是否在水印区域内
+                    if self.current_watermark_position:
+                        watermark_x, watermark_y = self.current_watermark_position
+                        
+                        # 使用实际的水印尺寸（从之前的输出可以看到是751x413）
+                        watermark_width = 751
+                        watermark_height = 413
+                        
+                        # 检查鼠标是否在水印区域内
+                        in_x_range = watermark_x <= original_mouse_x <= watermark_x + watermark_width
+                        in_y_range = watermark_y <= original_mouse_y <= watermark_y + watermark_height
+                        
+                        if in_x_range and in_y_range:
+                            self.is_dragging = True
+                            self.drag_start_pos = event.pos()
+                            self.drag_watermark_offset = (original_mouse_x - watermark_x, original_mouse_y - watermark_y)
+                            self.status_bar.showMessage('开始拖拽水印位置 - 拖拽水印到任意位置')
+                            return
+                    
+                    # 如果不在水印区域内，不开始拖拽
+                    self.is_dragging = False
+                    print(f"鼠标点击位置不在水印区域内: ({original_mouse_x}, {original_mouse_y})")
+            
+    def on_preview_mouse_move(self, event):
+        """
+        预览区域鼠标移动事件
+        """
+        if self.is_dragging and self.processed_image is not None:
+            # 获取预览图片的尺寸和位置
+            pixmap = self.preview_label.pixmap()
+            if pixmap:
+                # 计算预览图片在QLabel中的位置
+                label_size = self.preview_label.size()
+                pixmap_size = pixmap.size()
+                
+                # 计算图片在QLabel中的偏移量（居中显示）
+                offset_x = (label_size.width() - pixmap_size.width()) // 2
+                offset_y = (label_size.height() - pixmap_size.height()) // 2
+                
+                # 计算鼠标在图片上的相对位置
+                mouse_x = event.pos().x() - offset_x
+                mouse_y = event.pos().y() - offset_y
+                
+                # 确保鼠标在图片范围内
+                if (0 <= mouse_x < pixmap_size.width() and
+                    0 <= mouse_y < pixmap_size.height()):
+                    
+                    # 计算水印在原始图片上的位置
+                    original_image = self.image_processor.load_image(
+                        self.image_files[self.current_image_index]
+                    )
+                    original_width, original_height = original_image.size
+                    
+                    # 计算缩放比例
+                    scale_x = original_width / pixmap_size.width()
+                    scale_y = original_height / pixmap_size.height()
+                    
+                    # 计算鼠标在原始图片上的位置
+                    original_mouse_x = int(mouse_x * scale_x)
+                    original_mouse_y = int(mouse_y * scale_y)
+                    
+                    # 计算新的水印位置（考虑偏移量）
+                    watermark_x = original_mouse_x - self.drag_watermark_offset[0]
+                    watermark_y = original_mouse_y - self.drag_watermark_offset[1]
+                    
+                    # 确保水印位置在图片范围内
+                    watermark_x = max(0, min(watermark_x, original_width - 100))  # 留出100像素边距
+                    watermark_y = max(0, min(watermark_y, original_height - 100))  # 留出100像素边距
+                    
+                    # 更新水印位置
+                    self.current_watermark_position = (watermark_x, watermark_y)
+                    
+                    # 更新状态栏显示位置，但不立即重新应用水印（提高性能）
+                    self.status_bar.showMessage(f'拖拽中 - 水印位置: ({watermark_x}, {watermark_y})')
+                    
+    def on_preview_mouse_release(self, event):
+        """
+        预览区域鼠标释放事件
+        """
+        if self.is_dragging and event.button() == Qt.LeftButton:
+            self.is_dragging = False
+            # 拖拽结束时才重新应用水印，提高性能
+            if self.current_watermark_position:
+                watermark_x, watermark_y = self.current_watermark_position
+                self.apply_watermark_to_position(watermark_x, watermark_y)
+                self.status_bar.showMessage(f'水印位置已更新: ({watermark_x}, {watermark_y})')
+            
+    def apply_watermark_to_position(self, x, y):
+        """
+        应用水印到指定位置
+        """
+        if self.current_image_index < 0 or self.current_image_index >= len(self.image_files):
+            return
+            
+        try:
+            # 加载当前图片
+            image_path = self.image_files[self.current_image_index]
+            image = self.image_processor.load_image(image_path)
+            
+            # 检查是否同时使用文本和图片水印
+            use_text = bool(self.text_input.text().strip())
+            use_image = self.current_watermark_image is not None
+            
+            if not use_text and not use_image:
+                return
+                
+            # 应用文本水印
+            if use_text:
+                text = self.text_input.text()
+                font_size = self.font_size_spinbox.value()
+                opacity = self.text_opacity_spinbox.value()
+                color = (self.watermark_color.red(),
+                        self.watermark_color.green(),
+                        self.watermark_color.blue(),
+                        self.watermark_color.alpha())
+                rotation = self.text_rotation_slider.value()
+                
+                image = self.image_processor.add_text_watermark(
+                    image, text, "custom",
+                    font_size=font_size,
+                    color=color,
+                    opacity=opacity,
+                    rotation=rotation,
+                    custom_position=(x, y)
+                )
+                
+            # 应用图片水印
+            if use_image:
+                scale = self.scale_spinbox.value()
+                opacity = self.image_opacity_spinbox.value()
+                rotation = self.image_rotation_slider.value()
+                
+                image = self.image_processor.add_image_watermark(
+                    image, self.current_watermark_image, "custom",
+                    scale=scale,
+                    opacity=opacity,
+                    rotation=rotation,
+                    custom_position=(x, y)
+                )
+                
+            # 保存处理后的图像
+            self.processed_image = image
+            
+            # 显示添加水印后的图片
+            self.display_processed_image(image)
+            
+        except Exception as e:
+            print(f"应用水印到指定位置失败: {e}")
             
     def load_initial_settings(self):
         """
@@ -948,10 +1188,22 @@ class MainWindow(QMainWindow):
                 if index >= 0:
                     self.position_combo.setCurrentIndex(index)
                     
-            QMessageBox.information(self, "成功", f"模板 '{template_name}' 已加载")
+            # 自动应用水印到当前图片
+            if self.current_image_index >= 0:
+                self.apply_watermark()
+                self.status_bar.showMessage(f'模板 "{template_name}" 已加载并应用')
+            else:
+                self.status_bar.showMessage(f'模板 "{template_name}" 已加载')
             
         except Exception as e:
             QMessageBox.warning(self, "错误", f"加载模板失败: {str(e)}")
+            
+    def on_template_selected(self, template_name):
+        """
+        当模板被选中时的处理函数
+        """
+        if template_name != "-- 选择模板 --" and template_name:
+            self.load_template()
             
     def delete_template(self):
         """
@@ -1018,7 +1270,7 @@ class ExportSettingsDialog(QDialog):
         format_layout = QFormLayout()
         
         self.format_combo = QComboBox()
-        self.format_combo.addItems(["JPEG", "PNG"])
+        self.format_combo.addItems(["原图格式", "JPEG", "PNG"])
         format_layout.addRow("格式:", self.format_combo)
         
         self.quality_slider = QSlider(Qt.Horizontal)
@@ -1120,10 +1372,14 @@ class ExportSettingsDialog(QDialog):
         加载导出设置
         """
         try:
-            export_format = self.config_manager.get_setting("export.format", "JPEG")
-            index = self.format_combo.findText(export_format)
-            if index >= 0:
-                self.format_combo.setCurrentIndex(index)
+            # 默认使用原图格式
+            export_format = self.config_manager.get_setting("export.format", "原图格式")
+            if export_format == "原图格式":
+                self.format_combo.setCurrentText("原图格式")
+            else:
+                index = self.format_combo.findText(export_format)
+                if index >= 0:
+                    self.format_combo.setCurrentIndex(index)
                 
             quality = self.config_manager.get_setting("export.quality", 95)
             self.quality_slider.setValue(quality)

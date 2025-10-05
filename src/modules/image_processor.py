@@ -26,9 +26,7 @@ class ImageProcessor:
         """
         try:
             image = Image.open(file_path)
-            # 转换为RGBA模式以支持透明度
-            if image.mode != "RGBA":
-                image = image.convert("RGBA")
+            # 保持原图模式，只在需要时转换为RGBA
             return image
         except Exception as e:
             raise Exception(f"无法加载图片 {file_path}: {str(e)}")
@@ -46,11 +44,20 @@ class ImageProcessor:
             
             # 对于JPEG格式，需要转换为RGB模式（不支持透明度）
             if file_format == 'JPEG':
-                rgb_image = Image.new("RGB", image.size, (255, 255, 255))
-                rgb_image.paste(image, mask=image.split()[-1] if image.mode == 'RGBA' else None)
-                rgb_image.save(file_path, format=file_format, quality=quality)
+                if image.mode == 'RGBA':
+                    # 创建白色背景
+                    rgb_image = Image.new("RGB", image.size, (255, 255, 255))
+                    # 将RGBA图像粘贴到RGB背景上
+                    rgb_image.paste(image, mask=image.split()[-1])
+                    image = rgb_image
+                elif image.mode != 'RGB':
+                    image = image.convert("RGB")
+                
+                # 保存JPEG，使用最高质量
+                image.save(file_path, format=file_format, quality=quality, optimize=True, subsampling=0)
             else:
-                image.save(file_path, format=file_format)
+                # 对于PNG等格式，保持原模式，使用无损压缩
+                image.save(file_path, format=file_format, optimize=True)
         except Exception as e:
             raise Exception(f"无法保存图片 {file_path}: {str(e)}")
     
@@ -68,6 +75,7 @@ class ImageProcessor:
                 - color: 文本颜色 (R, G, B, A)
                 - opacity: 透明度 (0-100)
                 - rotation: 旋转角度
+                - custom_position: 自定义位置 (x, y) 元组
         
         Returns:
             添加水印后的图像
@@ -94,21 +102,18 @@ class ImageProcessor:
             
             print(f"处理前颜色: {color}, 透明度: {opacity}")
             
-            # 根据规范，直接使用用户选择的颜色值，仅调整透明度
-            # 注意：PyQt 返回的是RGB顺序，但PIL需要BGR顺序，所以需要转换
+            # 直接使用用户选择的颜色值，仅调整透明度
             # 透明度逻辑：opacity值越大越透明（即不透明度越小）
             if len(color) == 3:
-                # PyQt返回的是RGB顺序，PIL需要BGR顺序，所以需要转换
                 r, g, b = color
                 # 透明度逻辑：opacity值越大越透明，所以alpha值应该越小
                 a = int(255 * (100 - opacity) / 100)  # 100-opacity转换为不透明度
-                color = (b, g, r, a)  # 转换为BGR顺序
+                color = (r, g, b, a)  # 保持RGB顺序
             elif len(color) == 4:
-                # PyQt返回的是RGBA顺序，PIL需要BGRA顺序，所以需要转换
                 r, g, b, original_a = color
                 # 透明度逻辑：opacity值越大越透明，所以alpha值应该越小
                 a = int(original_a * (100 - opacity) / 100)
-                color = (b, g, r, a)  # 转换为BGRA顺序
+                color = (r, g, b, a)  # 保持RGBA顺序
             
             print(f"处理后颜色: {color}")
             
@@ -206,7 +211,8 @@ class ImageProcessor:
                 watermark_image = watermark_image.rotate(rotation, expand=1, fillcolor=(0, 0, 0, 0))
             
             # 解析位置
-            x, y = self._parse_position(position, image.size, watermark_image.size)
+            custom_position = kwargs.get('custom_position', None)
+            x, y = self._parse_position(position, image.size, watermark_image.size, custom_position)
             print(f"水印最终位置: ({x}, {y})")
             print(f"背景图像大小: {image.size}")
             print(f"水印图像大小: {watermark_image.size}")
@@ -214,9 +220,22 @@ class ImageProcessor:
             # 创建结果图像
             result = image.copy()
             
+            # 如果原图不是RGBA模式，需要转换为RGBA以支持透明度
+            if result.mode != "RGBA":
+                result = result.convert("RGBA")
+            
             # 粘贴水印
             result.paste(watermark_image, (x, y), watermark_image)
             print("文本水印添加完成")
+            
+            # 如果原图不是RGBA模式，转换回原图模式以保持质量
+            if image.mode != "RGBA" and result.mode == "RGBA":
+                if image.mode == "RGB":
+                    result = result.convert("RGB")
+                elif image.mode == "L":
+                    result = result.convert("L")
+                # 其他模式保持RGBA
+                
             return result
         except Exception as e:
             print(f"添加文本水印失败: {str(e)}")
@@ -236,6 +255,7 @@ class ImageProcessor:
                 - scale: 缩放比例
                 - opacity: 透明度 (0-100)
                 - rotation: 旋转角度
+                - custom_position: 自定义位置 (x, y) 元组
         
         Returns:
             添加水印后的图像
@@ -285,7 +305,8 @@ class ImageProcessor:
                 print(f"旋转水印: {rotation}度")
             
             # 解析位置
-            x, y = self._parse_position(position, image.size, watermark_image.size)
+            custom_position = kwargs.get('custom_position', None)
+            x, y = self._parse_position(position, image.size, watermark_image.size, custom_position)
             print(f"水印最终位置: ({x}, {y})")
             print(f"背景图像大小: {image.size}")
             print(f"水印图像大小: {watermark_image.size}")
@@ -293,9 +314,22 @@ class ImageProcessor:
             # 创建结果图像
             result = image.copy()
             
+            # 如果原图不是RGBA模式，需要转换为RGBA以支持透明度
+            if result.mode != "RGBA":
+                result = result.convert("RGBA")
+            
             # 粘贴水印图片
             result.paste(watermark_image, (x, y), watermark_image)
             print("图片水印添加完成")
+            
+            # 如果原图不是RGBA模式，转换回原图模式以保持质量
+            if image.mode != "RGBA" and result.mode == "RGBA":
+                if image.mode == "RGB":
+                    result = result.convert("RGB")
+                elif image.mode == "L":
+                    result = result.convert("L")
+                # 其他模式保持RGBA
+                
             return result
         except Exception as e:
             print(f"添加图片水印失败: {str(e)}")
@@ -303,7 +337,7 @@ class ImageProcessor:
             traceback.print_exc()
             raise Exception(f"添加图片水印失败: {str(e)}")
     
-    def _parse_position(self, position, image_size, watermark_size):
+    def _parse_position(self, position, image_size, watermark_size, custom_position=None):
         """
         解析水印位置
         
@@ -311,6 +345,7 @@ class ImageProcessor:
             position: 位置参数，可以是(x, y)元组或预设位置字符串
             image_size: 背景图片尺寸 (width, height)
             watermark_size: 水印尺寸 (width, height)
+            custom_position: 自定义位置 (x, y) 元组
         
         Returns:
             (x, y) 位置坐标
@@ -320,6 +355,11 @@ class ImageProcessor:
         
         print(f"解析位置: {position}")
         print(f"背景尺寸: {image_size}, 水印尺寸: {watermark_size}")
+        
+        # 如果提供了自定义位置，优先使用
+        if custom_position is not None and isinstance(custom_position, tuple) and len(custom_position) == 2:
+            print(f"使用自定义位置: {custom_position}")
+            return custom_position
         
         # 如果位置是元组，直接返回
         if isinstance(position, tuple) and len(position) == 2:
