@@ -256,24 +256,30 @@ class ImageProcessor:
             # 添加描边效果以增强可见性
             if outline:
                 outline_color = (0, 0, 0, 255)  # 纯黑色描边，完全不透明
-                # 大幅增加描边范围，使效果非常明显
-                for dx in [-4, -3, -2, -1, 0, 1, 2, 3, 4]:
-                    for dy in [-4, -3, -2, -1, 0, 1, 2, 3, 4]:
+                # 增强描边效果：在更大范围内绘制
+                offsets = []
+                for dx in range(-3, 4):
+                    for dy in range(-3, 4):
                         if dx != 0 or dy != 0:  # 不在中心位置
-                            draw.text((draw_x + dx, draw_y + dy), text, font=font, fill=outline_color)
+                            offsets.append((dx, dy))
+                for dx, dy in offsets:
+                    draw.text((draw_x + dx, draw_y + dy), text, font=font, fill=outline_color)
             
             # 添加阴影效果
             if shadow:
-                shadow_color = (0, 0, 0, 255)  # 纯黑色阴影，完全不透明
-                shadow_offset = 8  # 大幅增加阴影偏移量，使效果非常明显
+                # 增强阴影效果：更明显
+                shadow_color = (0, 0, 0, 255)  # 较深的黑色阴影
+                shadow_offset = 8  # 更大的偏移量
+                # 绘制阴影文本
                 draw.text((draw_x + shadow_offset, draw_y + shadow_offset), text, font=font, fill=shadow_color)
             
             # 绘制主文本 - 增强粗体和斜体效果
             if bold:
-                # 粗体效果：在多个位置绘制文本来加粗
+                # 增强粗体效果：在更大范围内绘制
                 for offset in range(-2, 3):
                     draw.text((draw_x + offset, draw_y), text, font=font, fill=color)
-                    draw.text((draw_x, draw_y + offset), text, font=font, fill=color)
+                    if offset != 0:  # 避免重复绘制中心位置
+                        draw.text((draw_x, draw_y + offset), text, font=font, fill=color)
             else:
                 # 正常绘制
                 draw.text((draw_x, draw_y), text, font=font, fill=color)
