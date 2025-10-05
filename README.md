@@ -4,14 +4,14 @@
 
 ## 🚀 最新版本
 
-**当前版本**: v1.0.0
+**当前版本**: v1.0.1
 **发布日期**: 2025-10-05
 **支持平台**: Windows 10/11
 **文件大小**: 54.25 MB
 
 ### 📥 下载地址
 
-[![下载最新版本](https://img.shields.io/badge/Download-v1.0.0-blue)](https://github.com/Cherry-CJQ/Photot_Watermark_2/releases/latest)
+[![下载最新版本](https://img.shields.io/badge/Download-v1.0.1-blue)](https://github.com/Cherry-CJQ/Photot_Watermark_2/releases/latest)
 
 **直接下载**: [Photot_Watermark.exe](dist/Photot_Watermark.exe)
 
