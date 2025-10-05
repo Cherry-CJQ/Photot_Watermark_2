@@ -96,9 +96,30 @@ class MainWindow(QMainWindow):
         self.image_list_layout.addWidget(self.image_list)
         
         # 添加导入按钮
+        import_buttons_layout = QHBoxLayout()
+        
         self.import_button = QPushButton('导入图片')
         self.import_button.clicked.connect(self.import_images)
-        self.image_list_layout.addWidget(self.import_button)
+        import_buttons_layout.addWidget(self.import_button)
+        
+        self.import_folder_button = QPushButton('导入文件夹')
+        self.import_folder_button.clicked.connect(self.import_folder)
+        import_buttons_layout.addWidget(self.import_folder_button)
+        
+        self.image_list_layout.addLayout(import_buttons_layout)
+        
+        # 添加删除按钮
+        delete_buttons_layout = QHBoxLayout()
+        
+        self.delete_selected_button = QPushButton('删除选中')
+        self.delete_selected_button.clicked.connect(self.delete_selected_image)
+        delete_buttons_layout.addWidget(self.delete_selected_button)
+        
+        self.delete_all_button = QPushButton('清空列表')
+        self.delete_all_button.clicked.connect(self.delete_all_images)
+        delete_buttons_layout.addWidget(self.delete_all_button)
+        
+        self.image_list_layout.addLayout(delete_buttons_layout)
         
         # 将图片列表区域添加到主布局
         self.main_layout.addWidget(self.image_list_widget, 1)
@@ -120,13 +141,20 @@ class MainWindow(QMainWindow):
         # 添加预览标签
         self.preview_label = QLabel()
         self.preview_label.setAlignment(Qt.AlignCenter)
-        self.preview_label.setText('请选择图片进行预览')
+        self.preview_label.setText('请选择图片进行预览\n\n或者拖拽图片文件到这里')
         self.preview_label.setMinimumSize(400, 400)
         self.preview_label.setStyleSheet("border: 1px solid gray;")
         self.preview_label.setMouseTracking(True)  # 启用鼠标跟踪
         self.preview_label.mousePressEvent = self.on_preview_mouse_press
         self.preview_label.mouseMoveEvent = self.on_preview_mouse_move
         self.preview_label.mouseReleaseEvent = self.on_preview_mouse_release
+        
+        # 启用拖拽功能
+        self.preview_label.setAcceptDrops(True)
+        self.preview_label.dragEnterEvent = self.on_drag_enter
+        self.preview_label.dragMoveEvent = self.on_drag_move
+        self.preview_label.dropEvent = self.on_drop
+        
         self.preview_layout.addWidget(self.preview_label)
         
         # 拖拽相关变量
@@ -174,9 +202,24 @@ class MainWindow(QMainWindow):
         self.text_input = QLineEdit("水印文本")
         text_layout.addRow("文本:", self.text_input)
         
+        # 字体选择
+        font_layout = QHBoxLayout()
+        self.font_combo = QComboBox()
+        self.load_system_fonts()
+        font_layout.addWidget(self.font_combo)
+        
+        self.bold_checkbox = QCheckBox("粗体")
+        font_layout.addWidget(self.bold_checkbox)
+        
+        self.italic_checkbox = QCheckBox("斜体")
+        font_layout.addWidget(self.italic_checkbox)
+        
+        text_layout.addRow("字体:", font_layout)
+        
         self.font_size_spinbox = QSpinBox()
-        self.font_size_spinbox.setRange(8, 100)
-        self.font_size_spinbox.setValue(24)
+        self.font_size_spinbox.setRange(0, 100)
+        self.font_size_spinbox.setValue(20)
+        self.font_size_spinbox.setSuffix(" %")
         text_layout.addRow("字体大小:", self.font_size_spinbox)
         
         color_layout = QHBoxLayout()
@@ -195,6 +238,15 @@ class MainWindow(QMainWindow):
         self.text_opacity_spinbox.setValue(50)
         self.text_opacity_spinbox.setSuffix(" %")
         text_layout.addRow("透明度:", self.text_opacity_spinbox)
+        
+        # 阴影和描边效果
+        effect_layout = QHBoxLayout()
+        self.outline_checkbox = QCheckBox("描边")
+        self.shadow_checkbox = QCheckBox("阴影")
+        effect_layout.addWidget(self.outline_checkbox)
+        effect_layout.addWidget(self.shadow_checkbox)
+        effect_layout.addStretch()
+        text_layout.addRow("效果:", effect_layout)
         
         # 文本水印旋转
         text_rotation_layout = QHBoxLayout()
@@ -376,12 +428,63 @@ class MainWindow(QMainWindow):
         """
         # 打开文件选择对话框
         file_names, _ = QFileDialog.getOpenFileNames(
-            self, 
-            '选择图片文件', 
-            '', 
-            '图片文件 (*.jpg *.jpeg *.png *.bmp *.tiff *.tif)'
+            self,
+            '选择图片文件',
+            '',
+            '图片文件 (*.jpg *.jpeg *.png *.bmp *.tiff *.tif);;JPEG文件 (*.jpg *.jpeg);;PNG文件 (*.png);;BMP文件 (*.bmp);;TIFF文件 (*.tiff *.tif);;所有文件 (*.*)'
         )
         
+        if file_names:
+            self.add_images_to_list(file_names)
+            
+    def import_folder(self):
+        """
+        导入文件夹中的所有图片
+        """
+        folder_path = QFileDialog.getExistingDirectory(
+            self,
+            '选择包含图片的文件夹',
+            ''
+        )
+        
+        if folder_path:
+            # 扫描文件夹中的所有图片文件
+            image_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif'}
+            image_files = []
+            
+            for root, dirs, files in os.walk(folder_path):
+                for file in files:
+                    if os.path.splitext(file)[1].lower() in image_extensions:
+                        image_files.append(os.path.join(root, file))
+            
+            if image_files:
+                self.add_images_to_list(image_files)
+            else:
+                QMessageBox.information(self, "提示", "所选文件夹中没有找到支持的图片文件")
+                
+    def load_system_fonts(self):
+        """
+        加载系统字体
+        """
+        from PyQt5.QtGui import QFontDatabase
+        font_database = QFontDatabase()
+        font_families = font_database.families()
+        
+        # 添加常用中文字体到前面
+        chinese_fonts = ["微软雅黑", "宋体", "黑体", "楷体", "仿宋"]
+        for font in chinese_fonts:
+            if font in font_families:
+                self.font_combo.addItem(font)
+                font_families.remove(font)
+        
+        # 添加其他字体
+        for font in sorted(font_families):
+            self.font_combo.addItem(font)
+    
+    def add_images_to_list(self, file_names):
+        """
+        将图片添加到列表
+        """
         if file_names:
             # 添加图片到列表
             for file_name in file_names:
@@ -439,6 +542,75 @@ class MainWindow(QMainWindow):
         """
         self.current_image_index = self.image_list.row(item)
         self.display_image(self.current_image_index)
+        
+    def delete_selected_image(self):
+        """
+        删除选中的图片
+        """
+        current_row = self.image_list.currentRow()
+        if current_row >= 0 and current_row < len(self.image_files):
+            # 获取要删除的图片名称
+            image_name = os.path.basename(self.image_files[current_row])
+            
+            reply = QMessageBox.question(
+                self, "确认删除",
+                f"确定要删除图片 '{image_name}' 吗？",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            
+            if reply == QMessageBox.Yes:
+                # 删除图片文件路径
+                del self.image_files[current_row]
+                
+                # 删除列表项
+                self.image_list.takeItem(current_row)
+                
+                # 更新当前选中索引
+                if self.image_files:
+                    if current_row >= len(self.image_files):
+                        self.current_image_index = len(self.image_files) - 1
+                    else:
+                        self.current_image_index = current_row
+                    self.image_list.setCurrentRow(self.current_image_index)
+                    self.display_image(self.current_image_index)
+                else:
+                    self.current_image_index = -1
+                    self.preview_label.setText('请选择图片进行预览\n\n或者拖拽图片文件到这里')
+                    self.preview_label.setAlignment(Qt.AlignCenter)
+                
+                self.status_bar.showMessage(f'已删除图片: {image_name}')
+                
+    def delete_all_images(self):
+        """
+        清空所有图片
+        """
+        if not self.image_files:
+            self.status_bar.showMessage('图片列表已为空')
+            return
+            
+        reply = QMessageBox.question(
+            self, "确认清空",
+            f"确定要清空所有图片吗？共 {len(self.image_files)} 张图片",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            # 清空图片文件列表
+            self.image_files.clear()
+            
+            # 清空列表控件
+            self.image_list.clear()
+            
+            # 重置当前选中索引
+            self.current_image_index = -1
+            
+            # 重置预览区域
+            self.preview_label.setText('请选择图片进行预览\n\n或者拖拽图片文件到这里')
+            self.preview_label.setAlignment(Qt.AlignCenter)
+            
+            self.status_bar.showMessage('已清空所有图片')
         
     def display_image(self, index):
         """
@@ -650,12 +822,26 @@ class MainWindow(QMainWindow):
                                     self.watermark_color.alpha())
                             rotation = self.text_rotation_slider.value()
                             
+                            # 获取字体设置
+                            font_family = self.font_combo.currentText()
+                            bold = self.bold_checkbox.isChecked()
+                            italic = self.italic_checkbox.isChecked()
+                            
+                            # 获取效果设置
+                            outline = self.outline_checkbox.isChecked()
+                            shadow = self.shadow_checkbox.isChecked()
+                            
                             image = self.image_processor.add_text_watermark(
                                 image, text, position,
                                 font_size=font_size,
                                 color=color,
                                 opacity=opacity,
-                                rotation=rotation
+                                rotation=rotation,
+                                font_family=font_family,
+                                bold=bold,
+                                italic=italic,
+                                outline=outline,
+                                shadow=shadow
                             )
                         
                         # 应用图片水印
@@ -771,18 +957,32 @@ class MainWindow(QMainWindow):
                 text = self.text_input.text()
                 font_size = self.font_size_spinbox.value()
                 opacity = self.text_opacity_spinbox.value()
-                color = (self.watermark_color.red(), 
-                        self.watermark_color.green(), 
-                        self.watermark_color.blue(), 
+                color = (self.watermark_color.red(),
+                        self.watermark_color.green(),
+                        self.watermark_color.blue(),
                         self.watermark_color.alpha())
                 rotation = self.text_rotation_slider.value()
+                
+                # 获取字体设置
+                font_family = self.font_combo.currentText()
+                bold = self.bold_checkbox.isChecked()
+                italic = self.italic_checkbox.isChecked()
+                
+                # 获取效果设置
+                outline = self.outline_checkbox.isChecked()
+                shadow = self.shadow_checkbox.isChecked()
                 
                 image = self.image_processor.add_text_watermark(
                     image, text, position,
                     font_size=font_size,
                     color=color,
                     opacity=opacity,
-                    rotation=rotation
+                    rotation=rotation,
+                    font_family=font_family,
+                    bold=bold,
+                    italic=italic,
+                    outline=outline,
+                    shadow=shadow
                 )
                 
                 # 设置当前水印位置
@@ -1014,12 +1214,26 @@ class MainWindow(QMainWindow):
                         self.watermark_color.alpha())
                 rotation = self.text_rotation_slider.value()
                 
+                # 获取字体设置
+                font_family = self.font_combo.currentText()
+                bold = self.bold_checkbox.isChecked()
+                italic = self.italic_checkbox.isChecked()
+                
+                # 获取效果设置
+                outline = self.outline_checkbox.isChecked()
+                shadow = self.shadow_checkbox.isChecked()
+                
                 image = self.image_processor.add_text_watermark(
                     image, text, "custom",
                     font_size=font_size,
                     color=color,
                     opacity=opacity,
                     rotation=rotation,
+                    font_family=font_family,
+                    bold=bold,
+                    italic=italic,
+                    outline=outline,
+                    shadow=shadow,
                     custom_position=(x, y)
                 )
                 
@@ -1062,7 +1276,7 @@ class MainWindow(QMainWindow):
             text_content = self.config_manager.get_setting("watermark.text.content", "水印文本")
             self.text_input.setText(text_content)
             
-            font_size = self.config_manager.get_setting("watermark.text.font_size", 24)
+            font_size = self.config_manager.get_setting("watermark.text.font_size", 20)
             self.font_size_spinbox.setValue(font_size)
             
             color_data = self.config_manager.get_setting("watermark.text.color", [255, 255, 255, 128])
@@ -1076,6 +1290,26 @@ class MainWindow(QMainWindow):
             
             text_rotation = self.config_manager.get_setting("watermark.text.rotation", 0)
             self.text_rotation_slider.setValue(text_rotation)
+            
+            # 加载字体设置
+            font_family = self.config_manager.get_setting("watermark.text.font_family", "")
+            if font_family:
+                index = self.font_combo.findText(font_family)
+                if index >= 0:
+                    self.font_combo.setCurrentIndex(index)
+            
+            bold = self.config_manager.get_setting("watermark.text.bold", False)
+            self.bold_checkbox.setChecked(bold)
+            
+            italic = self.config_manager.get_setting("watermark.text.italic", False)
+            self.italic_checkbox.setChecked(italic)
+            
+            # 加载效果设置
+            outline = self.config_manager.get_setting("watermark.text.outline", False)
+            self.outline_checkbox.setChecked(outline)
+            
+            shadow = self.config_manager.get_setting("watermark.text.shadow", False)
+            self.shadow_checkbox.setChecked(shadow)
             
             image_scale = self.config_manager.get_setting("watermark.image.scale", 1.0)
             self.scale_spinbox.setValue(image_scale)
@@ -1118,6 +1352,15 @@ class MainWindow(QMainWindow):
             self.config_manager.set_setting("watermark.text.opacity", self.text_opacity_spinbox.value())
             self.config_manager.set_setting("watermark.text.rotation", self.text_rotation_slider.value())
             
+            # 保存字体设置
+            self.config_manager.set_setting("watermark.text.font_family", self.font_combo.currentText())
+            self.config_manager.set_setting("watermark.text.bold", self.bold_checkbox.isChecked())
+            self.config_manager.set_setting("watermark.text.italic", self.italic_checkbox.isChecked())
+            
+            # 保存效果设置
+            self.config_manager.set_setting("watermark.text.outline", self.outline_checkbox.isChecked())
+            self.config_manager.set_setting("watermark.text.shadow", self.shadow_checkbox.isChecked())
+            
             self.config_manager.set_setting("watermark.image.scale", self.scale_spinbox.value())
             self.config_manager.set_setting("watermark.image.opacity", self.image_opacity_spinbox.value())
             self.config_manager.set_setting("watermark.image.rotation", self.image_rotation_slider.value())
@@ -1159,7 +1402,12 @@ class MainWindow(QMainWindow):
                         self.watermark_color.alpha()
                     ],
                     "opacity": self.text_opacity_spinbox.value(),
-                    "rotation": self.text_rotation_slider.value()
+                    "rotation": self.text_rotation_slider.value(),
+                    "font_family": self.font_combo.currentText(),
+                    "bold": self.bold_checkbox.isChecked(),
+                    "italic": self.italic_checkbox.isChecked(),
+                    "outline": self.outline_checkbox.isChecked(),
+                    "shadow": self.shadow_checkbox.isChecked()
                 }
                 
                 image_settings = {
@@ -1200,7 +1448,7 @@ class MainWindow(QMainWindow):
             if "text" in template_data:
                 text_settings = template_data["text"]
                 self.text_input.setText(text_settings.get("content", "水印文本"))
-                self.font_size_spinbox.setValue(text_settings.get("font_size", 24))
+                self.font_size_spinbox.setValue(text_settings.get("font_size", 20))
                 
                 color_data = text_settings.get("color", [255, 255, 255, 128])
                 self.watermark_color = QColor(color_data[0], color_data[1], color_data[2], color_data[3])
@@ -1210,6 +1458,20 @@ class MainWindow(QMainWindow):
                 
                 self.text_opacity_spinbox.setValue(text_settings.get("opacity", 50))
                 self.text_rotation_slider.setValue(text_settings.get("rotation", 0))
+                
+                # 应用字体设置
+                font_family = text_settings.get("font_family", "")
+                if font_family:
+                    index = self.font_combo.findText(font_family)
+                    if index >= 0:
+                        self.font_combo.setCurrentIndex(index)
+                
+                self.bold_checkbox.setChecked(text_settings.get("bold", False))
+                self.italic_checkbox.setChecked(text_settings.get("italic", False))
+                
+                # 应用效果设置
+                self.outline_checkbox.setChecked(text_settings.get("outline", False))
+                self.shadow_checkbox.setChecked(text_settings.get("shadow", False))
             
             # 应用图片设置
             if "image" in template_data:
@@ -1271,6 +1533,52 @@ class MainWindow(QMainWindow):
         # TODO: 实现模板管理对话框
         QMessageBox.information(self, "模板管理", "模板管理功能正在开发中...")
         
+    def on_drag_enter(self, event):
+        """
+        拖拽进入事件
+        """
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def on_drag_move(self, event):
+        """
+        拖拽移动事件
+        """
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def on_drop(self, event):
+        """
+        拖拽释放事件
+        """
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+            
+            # 获取拖拽的文件路径
+            urls = event.mimeData().urls()
+            file_paths = []
+            
+            for url in urls:
+                # 转换为本地文件路径
+                file_path = url.toLocalFile()
+                if os.path.isfile(file_path):
+                    # 检查文件是否为支持的图片格式
+                    ext = os.path.splitext(file_path)[1].lower()
+                    if ext in ['.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif']:
+                        file_paths.append(file_path)
+            
+            if file_paths:
+                self.add_images_to_list(file_paths)
+                self.status_bar.showMessage(f'已通过拖拽导入 {len(file_paths)} 张图片')
+            else:
+                self.status_bar.showMessage('拖拽的文件中没有找到支持的图片格式')
+        else:
+            event.ignore()
+
     def close_application(self):
         """
         关闭应用程序

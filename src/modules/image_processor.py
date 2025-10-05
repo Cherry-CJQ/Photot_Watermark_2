@@ -71,10 +71,15 @@ class ImageProcessor:
             position: 水印位置 (x, y) 或 预设位置字符串
             kwargs: 其他参数
                 - font_path: 字体文件路径
+                - font_family: 字体名称
                 - font_size: 字体大小
+                - bold: 粗体
+                - italic: 斜体
                 - color: 文本颜色 (R, G, B, A)
                 - opacity: 透明度 (0-100)
                 - rotation: 旋转角度
+                - outline: 描边效果
+                - shadow: 阴影效果
                 - custom_position: 自定义位置 (x, y) 元组
         
         Returns:
@@ -87,18 +92,33 @@ class ImageProcessor:
             
             # 获取参数
             font_path = kwargs.get('font_path', None)
+            font_family = kwargs.get('font_family', None)
             base_font_size = kwargs.get('font_size', 48)  # 基础字体大小
+            bold = kwargs.get('bold', False)
+            italic = kwargs.get('italic', False)
             color = kwargs.get('color', (255, 255, 255, 200))  # 默认改为白色半透明，提高可见性
             opacity = kwargs.get('opacity', 80)  # 默认透明度改为80，确保在各种背景上都可见
             rotation = kwargs.get('rotation', 0)
+            outline = kwargs.get('outline', False)
+            shadow = kwargs.get('shadow', False)
             
-            # 根据图片尺寸自适应调整字体大小
+            # 根据图片尺寸和用户设置的相对大小(0-100)计算实际字体大小
             img_width, img_height = image.size
-            # 以图片宽度的1/20作为参考字体大小
-            adaptive_font_size = max(base_font_size, int(min(img_width, img_height) / 20))
-            # 确保字体大小在合理范围内
-            font_size = min(adaptive_font_size, 200)  # 最大200像素
-            print(f"自适应字体大小: {font_size} (基础: {base_font_size}, 图片尺寸: {img_width}x{img_height})")
+            # 用户设置的base_font_size是0-100的相对值
+            # 计算基础字体大小范围：最小为图片宽度的1/50，最大为图片宽度的1/10
+            min_font_size = int(min(img_width, img_height) / 50)
+            max_font_size = int(min(img_width, img_height) / 10)
+            
+            # 将0-100的相对值映射到实际字体大小范围
+            if base_font_size <= 0:
+                font_size = min_font_size
+            elif base_font_size >= 100:
+                font_size = max_font_size
+            else:
+                # 线性插值计算实际字体大小
+                font_size = int(min_font_size + (max_font_size - min_font_size) * base_font_size / 100)
+            
+            print(f"实际字体大小: {font_size} (相对大小: {base_font_size}, 图片尺寸: {img_width}x{img_height})")
             
             print(f"处理前颜色: {color}, 透明度: {opacity}")
             
@@ -122,6 +142,41 @@ class ImageProcessor:
                 if font_path and os.path.exists(font_path):
                     font = ImageFont.truetype(font_path, font_size)
                     print(f"使用字体文件: {font_path}, 字体大小: {font_size}")
+                elif font_family:
+                    # 首先尝试使用字体文件查找，考虑粗体和斜体
+                    font_files = self._find_font_file(font_family, bold, italic)
+                    if font_files:
+                        font = ImageFont.truetype(font_files[0], font_size)
+                        print(f"使用字体文件: {font_files[0]}, 字体大小: {font_size}, 粗体: {bold}, 斜体: {italic}")
+                    else:
+                        # 如果找不到字体文件，尝试直接使用字体名称
+                        try:
+                            font = ImageFont.truetype(font_family, font_size)
+                            print(f"使用系统字体: {font_family}, 字体大小: {font_size}, 粗体: {bold}, 斜体: {italic}")
+                        except:
+                            # 最后尝试使用常见的中文字体
+                            chinese_fonts = [
+                                "msyh.ttc",      # 微软雅黑
+                                "simhei.ttf",    # 黑体
+                                "simsun.ttc",    # 宋体
+                                "simkai.ttf",    # 楷体
+                                "arial.ttf",     # Arial
+                                "arialuni.ttf"   # Arial Unicode
+                            ]
+                            
+                            font = None
+                            for font_name in chinese_fonts:
+                                try:
+                                    font = ImageFont.truetype(font_name, font_size)
+                                    print(f"使用中文字体: {font_name}, 字体大小: {font_size}, 粗体: {bold}, 斜体: {italic}")
+                                    break
+                                except:
+                                    continue
+                            
+                            # 如果没有找到合适的中文字体，使用默认字体
+                            if font is None:
+                                font = ImageFont.load_default()
+                                print(f"未找到合适的字体，使用默认字体，字体大小: {font_size}, 粗体: {bold}, 斜体: {italic}")
                 else:
                     # 尝试使用支持中文的系统字体
                     chinese_fonts = [
@@ -137,7 +192,7 @@ class ImageProcessor:
                     for font_name in chinese_fonts:
                         try:
                             font = ImageFont.truetype(font_name, font_size)
-                            print(f"使用中文字体: {font_name}, 字体大小: {font_size}")
+                            print(f"使用中文字体: {font_name}, 字体大小: {font_size}, 粗体: {bold}, 斜体: {italic}")
                             break
                         except:
                             continue
@@ -145,7 +200,11 @@ class ImageProcessor:
                     # 如果没有找到合适的中文字体，使用默认字体
                     if font is None:
                         font = ImageFont.load_default()
-                        print(f"未找到合适的字体，使用默认字体，字体大小: {font_size}")
+                        print(f"未找到合适的字体，使用默认字体，字体大小: {font_size}, 粗体: {bold}, 斜体: {italic}")
+                
+                # 如果粗体或斜体效果不明显，通过多次绘制来增强效果
+                if bold or italic:
+                    print(f"应用增强效果 - 粗体: {bold}, 斜体: {italic}")
             except Exception as e:
                 # 备用方案：使用默认字体
                 font = ImageFont.load_default()
@@ -194,16 +253,55 @@ class ImageProcessor:
             draw_y = (watermark_height - text_height) // 2
             print(f"文本绘制位置: ({draw_x}, {draw_y})")
             
-            # # 添加描边效果以增强可见性
-            # # 先绘制描边（黑色）
-            # outline_color = (0, 0, 0, 180)  # 黑色半透明
-            # for dx in [-2, -1, 0, 1, 2]:
-            #     for dy in [-2, -1, 0, 1, 2]:
-            #         if dx != 0 or dy != 0:  # 不在中心位置
-            #             draw.text((draw_x + dx, draw_y + dy), text, font=font, fill=outline_color)
+            # 添加描边效果以增强可见性
+            if outline:
+                outline_color = (0, 0, 0, 255)  # 纯黑色描边，完全不透明
+                # 大幅增加描边范围，使效果非常明显
+                for dx in [-4, -3, -2, -1, 0, 1, 2, 3, 4]:
+                    for dy in [-4, -3, -2, -1, 0, 1, 2, 3, 4]:
+                        if dx != 0 or dy != 0:  # 不在中心位置
+                            draw.text((draw_x + dx, draw_y + dy), text, font=font, fill=outline_color)
             
-            # 再绘制主文本
-            draw.text((draw_x, draw_y), text, font=font, fill=color)
+            # 添加阴影效果
+            if shadow:
+                shadow_color = (0, 0, 0, 255)  # 纯黑色阴影，完全不透明
+                shadow_offset = 8  # 大幅增加阴影偏移量，使效果非常明显
+                draw.text((draw_x + shadow_offset, draw_y + shadow_offset), text, font=font, fill=shadow_color)
+            
+            # 绘制主文本 - 增强粗体和斜体效果
+            if bold:
+                # 粗体效果：在多个位置绘制文本来加粗
+                for offset in range(-2, 3):
+                    draw.text((draw_x + offset, draw_y), text, font=font, fill=color)
+                    draw.text((draw_x, draw_y + offset), text, font=font, fill=color)
+            else:
+                # 正常绘制
+                draw.text((draw_x, draw_y), text, font=font, fill=color)
+            
+            print(f"描边效果: {outline}, 阴影效果: {shadow}, 粗体: {bold}, 斜体: {italic}")
+            
+            # 斜体效果：在绘制完成后应用剪切变换
+            if italic:
+                # 使用简单的剪切变换来倾斜整个水印图像
+                shear_factor = 0.2  # 剪切因子
+                width, height = watermark_image.size
+                new_width = int(width + abs(shear_factor) * height)
+                
+                # 创建变换后的图像
+                sheared_image = Image.new("RGBA", (new_width, height), (0, 0, 0, 0))
+                
+                # 应用剪切变换
+                for y in range(height):
+                    offset = int(shear_factor * y)
+                    for x in range(width):
+                        if 0 <= x + offset < new_width:
+                            try:
+                                sheared_image.putpixel((x + offset, y), watermark_image.getpixel((x, y)))
+                            except:
+                                pass
+                
+                # 替换原水印图像
+                watermark_image = sheared_image
             
             # 旋转水印
             if rotation != 0:
@@ -337,6 +435,98 @@ class ImageProcessor:
             traceback.print_exc()
             raise Exception(f"添加图片水印失败: {str(e)}")
     
+    def _find_font_file(self, font_family, bold=False, italic=False):
+        """
+        查找字体文件
+        
+        Args:
+            font_family: 字体名称
+            bold: 是否粗体
+            italic: 是否斜体
+        
+        Returns:
+            字体文件路径列表
+        """
+        import platform
+        system = platform.system()
+        
+        font_dirs = []
+        if system == "Windows":
+            font_dirs = [
+                os.path.join(os.environ.get('WINDIR', 'C:\\Windows'), 'Fonts'),
+                os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Microsoft', 'Windows', 'Fonts')
+            ]
+        elif system == "Darwin":  # macOS
+            font_dirs = [
+                '/Library/Fonts',
+                '/System/Library/Fonts',
+                os.path.expanduser('~/Library/Fonts')
+            ]
+        else:  # Linux
+            font_dirs = [
+                '/usr/share/fonts',
+                '/usr/local/share/fonts',
+                os.path.expanduser('~/.fonts')
+            ]
+        
+        # 中文字体名称映射
+        chinese_font_mapping = {
+            "楷体": ["simkai.ttf", "kaiu.ttf", "kai.ttf"],
+            "宋体": ["simsun.ttc", "simsun.ttf"],
+            "黑体": ["simhei.ttf", "msyh.ttc"],
+            "微软雅黑": ["msyh.ttc", "msyh.ttf"],
+            "仿宋": ["simfang.ttf"],
+            "隶书": ["simli.ttf"],
+            "幼圆": ["simyou.ttf"],
+            "华文宋体": ["stsong.ttf"],
+            "华文黑体": ["stheit.ttf"],
+            "华文楷体": ["stkaiti.ttf"]
+        }
+        
+        font_files = []
+        
+        # 首先检查中文字体映射
+        if font_family in chinese_font_mapping:
+            for font_name in chinese_font_mapping[font_family]:
+                for font_dir in font_dirs:
+                    if os.path.exists(font_dir):
+                        font_path = os.path.join(font_dir, font_name)
+                        if os.path.exists(font_path):
+                            font_files.append(font_path)
+                            print(f"找到中文字体文件: {font_path}")
+        
+        # 如果没找到，再扫描字体目录
+        if not font_files:
+            for font_dir in font_dirs:
+                if os.path.exists(font_dir):
+                    for root, dirs, files in os.walk(font_dir):
+                        for file in files:
+                            if file.lower().endswith(('.ttf', '.ttc', '.otf')):
+                                # 改进的字体名称匹配
+                                file_lower = file.lower()
+                                family_lower = font_family.lower()
+                                
+                                # 检查文件名是否包含字体名称
+                                if family_lower in file_lower:
+                                    # 检查样式匹配
+                                    if bold and ("bold" in file_lower or "粗体" in file_lower or "黑" in file_lower):
+                                        font_files.insert(0, os.path.join(root, file))  # 粗体优先
+                                    elif italic and ("italic" in file_lower or "斜体" in file_lower):
+                                        font_files.insert(0, os.path.join(root, file))  # 斜体优先
+                                    else:
+                                        font_files.append(os.path.join(root, file))
+                                # 检查常见的中文字体别名
+                                elif font_family == "楷体" and ("kai" in file_lower or "楷" in file_lower):
+                                    font_files.append(os.path.join(root, file))
+                                elif font_family == "宋体" and ("song" in file_lower or "宋" in file_lower or "sun" in file_lower):
+                                    font_files.append(os.path.join(root, file))
+                                elif font_family == "黑体" and ("hei" in file_lower or "黑" in file_lower):
+                                    font_files.append(os.path.join(root, file))
+                                elif font_family == "微软雅黑" and ("yahei" in file_lower or "雅黑" in file_lower):
+                                    font_files.append(os.path.join(root, file))
+        
+        return font_files
+
     def _parse_position(self, position, image_size, watermark_size, custom_position=None):
         """
         解析水印位置
