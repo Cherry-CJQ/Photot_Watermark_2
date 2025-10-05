@@ -550,6 +550,43 @@ class MainWindow(QMainWindow):
                         output_name = f"{export_settings['prefix']}{original_name}"
                     elif naming_rule == "添加后缀":
                         output_name = f"{name}{export_settings['suffix']}{ext}"
+                    elif naming_rule == "自定义命名":
+                        # 使用自定义命名模板
+                        custom_template = export_settings["custom_name"]
+                        sequence = i + export_settings["sequence_start"]
+                        digits = export_settings["sequence_digits"]
+                        sequence_str = str(sequence).zfill(digits)
+                        
+                        # 替换模板中的占位符
+                        output_name = custom_template
+                        output_name = output_name.replace("{序号}", sequence_str)
+                        output_name = output_name.replace("{原文件名}", name)
+                        output_name = output_name.replace("{扩展名}", ext[1:])  # 去掉点号
+                        
+                        # 如果模板中没有扩展名，则添加
+                        if not output_name.endswith(ext):
+                            output_name += ext
+                            
+                    elif naming_rule == "时间戳命名":
+                        # 生成时间戳
+                        from datetime import datetime
+                        now = datetime.now()
+                        timestamp_format = export_settings["timestamp_format"]
+                        
+                        if timestamp_format == "YYYYMMDD_HHMMSS":
+                            timestamp = now.strftime("%Y%m%d_%H%M%S")
+                        elif timestamp_format == "YYYY-MM-DD_HH-MM-SS":
+                            timestamp = now.strftime("%Y-%m-%d_%H-%M-%S")
+                        elif timestamp_format == "YYYYMMDD":
+                            timestamp = now.strftime("%Y%m%d")
+                        else:  # 时间戳
+                            timestamp = str(int(now.timestamp()))
+                        
+                        sequence = i + export_settings["sequence_start"]
+                        digits = export_settings["sequence_digits"]
+                        sequence_str = str(sequence).zfill(digits)
+                        
+                        output_name = f"{timestamp}_{sequence_str}{ext}"
                     else:  # 保留原文件名
                         output_name = original_name
                     
@@ -1296,7 +1333,9 @@ class ExportSettingsDialog(QDialog):
         self.naming_combo.addItems([
             "保留原文件名",
             "添加前缀",
-            "添加后缀"
+            "添加后缀",
+            "自定义命名",
+            "时间戳命名"
         ])
         self.naming_combo.currentTextChanged.connect(self.on_naming_rule_changed)
         naming_layout.addRow("命名规则:", self.naming_combo)
@@ -1306,6 +1345,39 @@ class ExportSettingsDialog(QDialog):
         
         self.suffix_input = QLineEdit("_watermarked")
         naming_layout.addRow("后缀:", self.suffix_input)
+        
+        # 自定义命名输入
+        self.custom_name_input = QLineEdit("")
+        self.custom_name_input.setPlaceholderText("例如: 图片_{序号}")
+        naming_layout.addRow("自定义名称:", self.custom_name_input)
+        
+        # 时间戳格式选择
+        timestamp_layout = QHBoxLayout()
+        self.timestamp_format_combo = QComboBox()
+        self.timestamp_format_combo.addItems([
+            "YYYYMMDD_HHMMSS",
+            "YYYY-MM-DD_HH-MM-SS",
+            "YYYYMMDD",
+            "时间戳"
+        ])
+        timestamp_layout.addWidget(self.timestamp_format_combo)
+        timestamp_layout.addStretch()
+        naming_layout.addRow("时间戳格式:", timestamp_layout)
+        
+        # 序号设置
+        sequence_layout = QHBoxLayout()
+        self.sequence_start_spinbox = QSpinBox()
+        self.sequence_start_spinbox.setRange(1, 9999)
+        self.sequence_start_spinbox.setValue(1)
+        self.sequence_digits_spinbox = QSpinBox()
+        self.sequence_digits_spinbox.setRange(1, 6)
+        self.sequence_digits_spinbox.setValue(3)
+        sequence_layout.addWidget(QLabel("起始序号:"))
+        sequence_layout.addWidget(self.sequence_start_spinbox)
+        sequence_layout.addWidget(QLabel("位数:"))
+        sequence_layout.addWidget(self.sequence_digits_spinbox)
+        sequence_layout.addStretch()
+        naming_layout.addRow("序号设置:", sequence_layout)
         
         naming_group.setLayout(naming_layout)
         layout.addWidget(naming_group)
@@ -1356,9 +1428,15 @@ class ExportSettingsDialog(QDialog):
         """
         is_prefix = rule == "添加前缀"
         is_suffix = rule == "添加后缀"
+        is_custom = rule == "自定义命名"
+        is_timestamp = rule == "时间戳命名"
         
         self.prefix_input.setEnabled(is_prefix)
         self.suffix_input.setEnabled(is_suffix)
+        self.custom_name_input.setEnabled(is_custom)
+        self.timestamp_format_combo.setEnabled(is_timestamp)
+        self.sequence_start_spinbox.setEnabled(is_custom or is_timestamp)
+        self.sequence_digits_spinbox.setEnabled(is_custom or is_timestamp)
         
     def on_resize_toggled(self, enabled):
         """
@@ -1389,6 +1467,10 @@ class ExportSettingsDialog(QDialog):
                 self.naming_combo.setCurrentText("添加前缀")
             elif naming_rule == "suffix":
                 self.naming_combo.setCurrentText("添加后缀")
+            elif naming_rule == "custom":
+                self.naming_combo.setCurrentText("自定义命名")
+            elif naming_rule == "timestamp":
+                self.naming_combo.setCurrentText("时间戳命名")
             else:
                 self.naming_combo.setCurrentText("保留原文件名")
                 
@@ -1397,6 +1479,20 @@ class ExportSettingsDialog(QDialog):
             
             suffix = self.config_manager.get_setting("export.suffix", "_watermarked")
             self.suffix_input.setText(suffix)
+            
+            custom_name = self.config_manager.get_setting("export.custom_name", "")
+            self.custom_name_input.setText(custom_name)
+            
+            timestamp_format = self.config_manager.get_setting("export.timestamp_format", "YYYYMMDD_HHMMSS")
+            index = self.timestamp_format_combo.findText(timestamp_format)
+            if index >= 0:
+                self.timestamp_format_combo.setCurrentIndex(index)
+                
+            sequence_start = self.config_manager.get_setting("export.sequence_start", 1)
+            self.sequence_start_spinbox.setValue(sequence_start)
+            
+            sequence_digits = self.config_manager.get_setting("export.sequence_digits", 3)
+            self.sequence_digits_spinbox.setValue(sequence_digits)
             
             resize_enabled = self.config_manager.get_setting("export.resize_enabled", False)
             self.resize_checkbox.setChecked(resize_enabled)
@@ -1425,11 +1521,19 @@ class ExportSettingsDialog(QDialog):
                 self.config_manager.set_setting("export.naming_rule", "prefix")
             elif naming_rule == "添加后缀":
                 self.config_manager.set_setting("export.naming_rule", "suffix")
+            elif naming_rule == "自定义命名":
+                self.config_manager.set_setting("export.naming_rule", "custom")
+            elif naming_rule == "时间戳命名":
+                self.config_manager.set_setting("export.naming_rule", "timestamp")
             else:
                 self.config_manager.set_setting("export.naming_rule", "original")
                 
             self.config_manager.set_setting("export.prefix", self.prefix_input.text())
             self.config_manager.set_setting("export.suffix", self.suffix_input.text())
+            self.config_manager.set_setting("export.custom_name", self.custom_name_input.text())
+            self.config_manager.set_setting("export.timestamp_format", self.timestamp_format_combo.currentText())
+            self.config_manager.set_setting("export.sequence_start", self.sequence_start_spinbox.value())
+            self.config_manager.set_setting("export.sequence_digits", self.sequence_digits_spinbox.value())
             
             # 保存尺寸设置
             self.config_manager.set_setting("export.resize_enabled", self.resize_checkbox.isChecked())
@@ -1452,6 +1556,10 @@ class ExportSettingsDialog(QDialog):
             "naming_rule": self.naming_combo.currentText(),
             "prefix": self.prefix_input.text(),
             "suffix": self.suffix_input.text(),
+            "custom_name": self.custom_name_input.text(),
+            "timestamp_format": self.timestamp_format_combo.currentText(),
+            "sequence_start": self.sequence_start_spinbox.value(),
+            "sequence_digits": self.sequence_digits_spinbox.value(),
             "resize_enabled": self.resize_checkbox.isChecked(),
             "max_width": self.max_width_spinbox.value(),
             "max_height": self.max_height_spinbox.value()
